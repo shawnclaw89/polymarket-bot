@@ -27,7 +27,7 @@ strategies:
     max_yes_price: 96         # cents
     max_hours_to_close: 48    # only markets closing within 2 days
     min_volume_24h: 500       # contracts
-    max_position_usd: 40
+    max_position_usd: 20
     min_return_pct: 0.5
 
   intramarket_arb:
