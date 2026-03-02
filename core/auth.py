@@ -39,19 +39,23 @@ def init(api_key_id: str, private_key_path: str, host: str) -> bool:
 
     try:
         import kalshi_python
+
         config = kalshi_python.Configuration(host=host)
-        config.api_key_id = api_key_id
-
-        with open(private_key_path, "r") as f:
-            config.private_key_pem = f.read()
-
         client = kalshi_python.KalshiClient(config)
+        client.set_kalshi_auth(api_key_id, private_key_path)
+
+        # Wire up sub-APIs
+        portfolio = kalshi_python.PortfolioApi(client)
+        markets   = kalshi_python.MarketsApi(client)
 
         # Test the connection
-        balance = client.portfolio_api.get_balance()
+        balance = portfolio.get_balance()
         log.info(f"Authenticated ✅ | Balance: ${balance.balance / 100:.2f}")
 
-        api_module._client = client
+        # Store in api module
+        api_module._client        = client
+        api_module._portfolio_api = portfolio
+        api_module._markets_api   = markets
         return True
 
     except Exception as e:

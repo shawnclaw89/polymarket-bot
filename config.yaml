@@ -1,7 +1,7 @@
 # ============================================================
 # Kalshi Bot — Configuration
 # ============================================================
-paper_trading: true
+paper_trading: false
 
 telegram_to: "7591705971"
 scan_interval: 300              # scan every 5 minutes (was 60s — reduces API hammering)
@@ -11,7 +11,7 @@ health_check_interval: 600     # check API health every 10 minutes
 kalshi_api_host: "https://api.elections.kalshi.com/trade-api/v2"
 
 # API Key auth (RSA) — fill in after generating keys (see README)
-api_key_id: ""
+api_key_id: "6216fe78-7adc-4670-a1cd-fdd1cc781269"
 private_key_path: "kalshi_private_key.pem"
 
 # ============================================================

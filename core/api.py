@@ -14,12 +14,10 @@ KALSHI_HOST = "https://api.elections.kalshi.com/trade-api/v2"
 _session = requests.Session()
 _session.headers.update({"Accept": "application/json"})
 
-# Authenticated kalshi-python client (set by auth.init())
-_client = None
-
-
-def get_client():
-    return _client
+# Authenticated kalshi-python client + sub-APIs (set by auth.init())
+_client        = None
+_portfolio_api = None
+_markets_api   = None
 
 
 # ── Public market data (no auth needed) ─────────────────────────────────────
@@ -81,22 +79,22 @@ def get_orderbook(ticker: str) -> dict:
 
 def get_balance() -> float:
     """Return balance in USD (converts from cents)."""
-    if not _client:
+    if not _portfolio_api:
         return 0.0
     try:
-        resp = _client.portfolio_api.get_balance()
+        resp = _portfolio_api.get_balance()
         return resp.balance / 100
     except Exception as e:
         log.error(f"get_balance failed: {e}")
-        return 0.0
+        return None   # None = unknown (different from 0.0 = confirmed broke)
 
 
 def get_positions() -> list:
     """Return open positions."""
-    if not _client:
+    if not _portfolio_api:
         return []
     try:
-        resp = _client.portfolio_api.get_positions()
+        resp = _portfolio_api.get_positions()
         return resp.market_positions or []
     except Exception as e:
         log.error(f"get_positions failed: {e}")
@@ -111,7 +109,7 @@ def place_order(ticker: str, side: str, count: int, price_cents: int,
     count: number of contracts
     price_cents: price in cents (1-99)
     """
-    if not _client:
+    if not _portfolio_api:
         log.error("Cannot place order — not authenticated.")
         return {}
     try:
@@ -124,7 +122,7 @@ def place_order(ticker: str, side: str, count: int, price_cents: int,
             yes_price=price_cents if side == "yes" else None,
             no_price=price_cents if side == "no" else None,
         )
-        resp = _client.portfolio_api.create_order(req)
+        resp = _portfolio_api.create_order(req)
         log.info(f"Order placed: {ticker} {side} {count}x @ {price_cents}¢")
         return resp.to_dict() if hasattr(resp, "to_dict") else {}
     except Exception as e:
