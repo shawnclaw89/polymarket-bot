@@ -133,17 +133,19 @@ def place_order(ticker: str, side: str, count: int, price_cents: int,
         log.error("Cannot place order — not authenticated.")
         return {}
     try:
-        from kalshi_python import CreateOrderRequest
-        req = CreateOrderRequest(
+        kwargs = dict(
             ticker=ticker,
             action="buy",
             side=side,
             count=count,
             type=order_type,
-            yes_price=price_cents if side == "yes" else None,
-            no_price=price_cents if side == "no" else None,
         )
-        resp = _portfolio_api.create_order(req)
+        if side == "yes":
+            kwargs["yes_price"] = price_cents
+        else:
+            kwargs["no_price"] = price_cents
+
+        resp = _portfolio_api.create_order(**kwargs)
         log.info(f"Order placed: {ticker} {side} {count}x @ {price_cents}¢")
         return resp.to_dict() if hasattr(resp, "to_dict") else {"ok": True}
     except Exception as e:
