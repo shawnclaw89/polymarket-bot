@@ -38,6 +38,13 @@ class BaseStrategy(ABC):
         if state.get("daily_pnl", 0) <= -risk.get("max_daily_loss_usd", 50):
             self.log.warning("Daily loss limit hit.")
             return False
+        # Live balance guard: refuse trade if it would exceed available funds
+        live_balance = state.get("live_balance")
+        if live_balance is not None and size_usd > live_balance:
+            self.log.warning(
+                f"Insufficient balance: need ${size_usd:.2f}, have ${live_balance:.2f}"
+            )
+            return False
         return True
 
     def passes_horizon_filter(self, entry_cents: int, close_time_str: str,

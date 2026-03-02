@@ -56,6 +56,26 @@ def run_once(strategies, config):
 
     log.info(f"--- Tick [{'PAPER' if paper else 'LIVE'}] ---")
 
+    # ── Balance guard (live only) ─────────────────────────────────────────────
+    if not paper:
+        balance = api.get_balance()
+        if balance is None:
+            log.error("Could not fetch account balance — skipping tick.")
+            return
+        if balance <= 0:
+            msg = (
+                "🛑 Kalshi bot STOPPED\n"
+                "Account balance is $0.00 — no funds available to trade.\n"
+                "Add funds manually at kalshi.com, then restart the bot."
+            )
+            log.error(msg)
+            notifier.send(msg, to=telegram_to)
+            sys.exit(0)
+        log.info(f"💰 Account balance: ${balance:.2f}")
+        state = state_mgr.load()
+        state["live_balance"] = balance
+        state_mgr.save(state)
+
     markets, _ = api.get_markets(limit=200)
     if not markets:
         log.error("No markets returned.")
