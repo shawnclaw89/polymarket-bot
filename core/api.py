@@ -23,15 +23,29 @@ _markets_api   = None
 # ── Public market data (no auth needed) ─────────────────────────────────────
 
 def get_markets(limit=200, status="open", cursor=None):
-    """Fetch open markets sorted by volume."""
-    params = {"limit": limit, "status": status}
+    """
+    Fetch open binary markets via the /events endpoint.
+    The /markets endpoint returns MVE parlay markets only.
+    Real standalone binary markets live under /events with nested markets.
+    """
+    params = {
+        "limit": min(limit, 200),
+        "status": status,
+        "with_nested_markets": "true",
+    }
     if cursor:
         params["cursor"] = cursor
     try:
-        resp = _session.get(f"{KALSHI_HOST}/markets", params=params, timeout=15)
+        resp = _session.get(f"{KALSHI_HOST}/events", params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
-        return data.get("markets", []), data.get("cursor")
+        markets = []
+        for event in data.get("events", []):
+            cat = event.get("category", "")
+            for m in event.get("markets", []):
+                m["_category"] = cat
+                markets.append(m)
+        return markets, data.get("cursor")
     except Exception as e:
         log.error(f"get_markets failed: {e}")
         return [], None
