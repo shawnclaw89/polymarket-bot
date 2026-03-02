@@ -12,7 +12,7 @@ health_check_interval: 600     # check API health every 10 minutes
 kalshi_api_host: "https://api.elections.kalshi.com/trade-api/v2"
 
 # API Key auth (RSA) — fill in after generating keys (see README)
-api_key_id: "6216fe78-7adc-4670-a1cd-fdd1cc781269"
+api_key_id: "6936d363-c349-4f3e-b529-9035387deac5"
 private_key_path: "kalshi_private_key.pem"
 
 # ============================================================
