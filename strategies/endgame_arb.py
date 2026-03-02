@@ -17,13 +17,14 @@ class EndgameArbStrategy(BaseStrategy):
     name = "endgame_arb"
 
     def scan(self, markets, state, cfg, paper_trading):
-        min_yes         = cfg.get("min_yes_price", 93)       # cents
-        max_yes         = cfg.get("max_yes_price", 96)       # cents
-        min_vol         = cfg.get("min_volume_24h", 500)
-        max_pos         = cfg.get("max_position_usd", 20)
-        min_ret         = cfg.get("min_return_pct", 0.5) / 100
-        max_hours       = cfg.get("max_hours_to_close", 24)  # only "ending soon" markets
-        risk            = state.get("_risk_config", {})
+        min_yes              = cfg.get("min_yes_price", 93)       # cents
+        max_yes              = cfg.get("max_yes_price", 96)       # cents
+        min_vol              = cfg.get("min_volume_24h", 500)
+        max_pos              = cfg.get("max_position_usd", 20)
+        min_ret              = cfg.get("min_return_pct", 0.5) / 100
+        max_hours            = cfg.get("max_hours_to_close", 24)
+        max_hours_crypto     = cfg.get("max_hours_to_close_crypto", 2)  # tighter for crypto
+        risk                 = state.get("_risk_config", {})
 
         now = datetime.now(timezone.utc)
         cutoff = now + timedelta(hours=max_hours)
@@ -34,6 +35,7 @@ class EndgameArbStrategy(BaseStrategy):
             title      = m.get("title", "")
             yes_ask    = m.get("yes_ask", 0)
             vol        = m.get("volume_24h", 0)
+            category   = m.get("_category", "")
             close_time = m.get("close_time") or m.get("expiration_time")
 
             # Must have a close time and be ending soon
@@ -44,8 +46,12 @@ class EndgameArbStrategy(BaseStrategy):
             except Exception:
                 continue
 
-            # Skip if not closing within our window, or already closed
-            if closes_at <= now or closes_at > cutoff:
+            # Crypto markets: tighter window (must close within 2h)
+            is_crypto = category.lower() == "crypto"
+            effective_cutoff = (now + timedelta(hours=max_hours_crypto)
+                                if is_crypto else cutoff)
+
+            if closes_at <= now or closes_at > effective_cutoff:
                 continue
 
             hours_left = (closes_at - now).total_seconds() / 3600
