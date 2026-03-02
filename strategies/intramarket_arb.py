@@ -11,10 +11,11 @@ class IntramarketArbStrategy(BaseStrategy):
     name = "intramarket_arb"
 
     def scan(self, markets, state, cfg, paper_trading):
-        min_gap  = cfg.get("min_gap_cents", 2)
-        max_pos  = cfg.get("max_position_usd", 50)
-        min_liq  = cfg.get("min_liquidity", 200)
-        risk     = state.get("_risk_config", {})
+        min_gap       = cfg.get("min_gap_cents", 2)
+        max_pos       = cfg.get("max_position_usd", 10)
+        min_liq       = cfg.get("min_liquidity", 200)
+        max_leg_cents = cfg.get("max_entry_cents", 55)   # cap each leg individually
+        risk          = state.get("_risk_config", {})
 
         opps = []
         for m in markets:
@@ -25,6 +26,10 @@ class IntramarketArbStrategy(BaseStrategy):
             liq     = m.get("liquidity", 0)
 
             if yes_ask <= 0 or no_ask <= 0 or liq < min_liq:
+                continue
+
+            # Skip arbs where either leg exceeds the per-trade price cap
+            if yes_ask > max_leg_cents or no_ask > max_leg_cents:
                 continue
 
             total = yes_ask + no_ask

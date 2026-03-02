@@ -101,6 +101,11 @@ class WhaleFollowStrategy(BaseStrategy):
             side = "YES" if last_price >= 50 else "NO"
             entry = yes_ask if side == "YES" else no_ask
 
+            # Hard cap: never enter above max_entry_cents on either side
+            max_entry = cfg.get("max_yes_price", 55)
+            if entry > max_entry:
+                continue
+
             signals.append({
                 "ticker": ticker,
                 "title": title,

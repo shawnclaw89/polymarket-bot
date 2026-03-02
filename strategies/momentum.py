@@ -9,10 +9,11 @@ class MomentumStrategy(BaseStrategy):
     name = "momentum"
 
     def scan(self, markets, state, cfg, paper_trading):
-        min_vol    = cfg.get("min_volume_24h", 5000)
-        min_move   = cfg.get("min_price_move_cents", 8)
-        max_pos    = cfg.get("max_position_usd", 30)
-        risk       = state.get("_risk_config", {})
+        min_vol       = cfg.get("min_volume_24h", 5000)
+        min_move      = cfg.get("min_price_move_cents", 8)
+        max_pos       = cfg.get("max_position_usd", 10)
+        max_entry     = cfg.get("max_entry_cents", 55)
+        risk          = state.get("_risk_config", {})
 
         opps = []
         for m in markets:
@@ -33,14 +34,14 @@ class MomentumStrategy(BaseStrategy):
             if move < min_move:
                 continue
 
-            # Don't chase extremes
-            if last_price > 90 or last_price < 10:
-                continue
-
             side = "YES" if last_price > 50 else "NO"
             entry = yes_ask if side == "YES" else no_ask
 
             if entry <= 0:
+                continue
+
+            # Hard cap: no single trade above max_entry_cents
+            if entry > max_entry:
                 continue
 
             opps.append({

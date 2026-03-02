@@ -35,6 +35,7 @@ strategies:
     min_gap_cents: 2          # min gap (e.g. 2 = $0.02 profit per pair)
     max_position_usd: 10
     min_liquidity: 200
+    max_entry_cents: 55       # neither leg may exceed this price
 
   momentum:
     enabled: false
@@ -42,6 +43,7 @@ strategies:
     min_volume_24h: 5000
     min_price_move_cents: 8   # min move in cents since open
     max_position_usd: 10
+    max_entry_cents: 55       # hard cap per trade
 
   polymarket_tail:
     enabled: true
@@ -62,7 +64,7 @@ strategies:
     max_position_usd: 10
     # Horizon + price filters
     max_whale_price: 0.50           # skip whale trades where PM price > 50¢ (no value left)
-    max_entry_cents: 50             # never pay more than 50¢ on Kalshi entry
+    max_entry_cents: 55             # never pay more than 55¢ on Kalshi entry
     long_horizon_days: 30           # markets closing further than this need lower price
     long_horizon_max_cents: 15      # if >30 days out, only enter at ≤15¢ (high return potential)
 
@@ -76,7 +78,7 @@ strategies:
     min_whale_confirmation_usd: 300
     max_position_usd: 10
     # Horizon + price filters
-    max_entry_cents: 50             # never pay more than 50¢ to enter
+    max_entry_cents: 55             # never pay more than 55¢ to enter
     long_horizon_days: 30           # markets closing further than this need lower price
     long_horizon_max_cents: 15      # if >30 days out, only enter at ≤15¢ (high return potential)
 
@@ -88,7 +90,7 @@ strategies:
     min_order_imbalance: 0.70   # 70%+ order book skew to one side
     max_spread_cents: 5         # only tight-spread markets (confident pricing)
     min_yes_price: 20           # avoid very cheap longshots
-    max_yes_price: 85           # avoid near-certain markets (endgame arb handles those)
+    max_yes_price: 55           # hard cap — endgame_arb handles anything above this
     min_signal_score: 3         # min combined signal score (max 8) to trigger
     max_position_usd: 10
 
