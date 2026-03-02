@@ -27,14 +27,14 @@ strategies:
     max_yes_price: 96         # cents
     max_hours_to_close: 48    # only markets closing within 2 days
     min_volume_24h: 500       # contracts
-    max_position_usd: 10
+    max_position_usd: 40
     min_return_pct: 0.5
 
   intramarket_arb:
     enabled: true
     description: "Buy YES+NO when sum < 100 cents"
     min_gap_cents: 2          # min gap (e.g. 2 = $0.02 profit per pair)
-    max_position_usd: 10
+    max_position_usd: 40
     min_liquidity: 200
     max_entry_cents: 55       # neither leg may exceed this price
     max_close_days: 7         # only markets closing within 1 week
@@ -106,6 +106,6 @@ strategies:
 # ============================================================
 risk:
   max_open_positions: 10
-  max_total_exposure_usd: 100    # 10 positions * $10 max
+  max_total_exposure_usd: 140    # up to ~3 arb ($40) + some signal ($10) positions
   stop_loss_pct: 30
   max_daily_loss_usd: 20         # hard stop if we lose $20 in a day
