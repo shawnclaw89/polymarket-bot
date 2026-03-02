@@ -6,6 +6,7 @@ We keep them as cents internally and convert to dollars only for display.
 """
 import logging
 import os
+import time
 import requests
 
 log = logging.getLogger(__name__)
@@ -22,16 +23,19 @@ _markets_api   = None
 
 # ── Public market data (no auth needed) ─────────────────────────────────────
 
-def get_markets(limit=200, status="open", cursor=None, max_pages=20):
+def get_markets(limit=200, status="open", cursor=None, max_pages=20, page_delay=0.5):
     """
     Fetch ALL open binary markets via the /events endpoint.
     The /markets endpoint returns MVE parlay markets only.
     Real standalone binary markets live under /events with nested markets.
     Paginates up to max_pages (default: fetch everything).
+    page_delay: seconds to sleep between pages to avoid 429s (default 0.5s).
     """
     all_markets = []
     cur = cursor
-    for _ in range(max_pages):
+    for page in range(max_pages):
+        if page > 0:
+            time.sleep(page_delay)  # rate limit: avoid 429 on rapid pagination
         params = {
             "limit": 200,
             "status": status,

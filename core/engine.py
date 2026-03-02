@@ -81,6 +81,29 @@ def run_once(strategies, config, arb_only=False):
         log.info(f"💰 Account balance: ${balance:.2f}")
         state = state_mgr.load()
         state["live_balance"] = balance
+
+        # ── Auto-clear settled positions ─────────────────────────────────────
+        # Sync state vs real Kalshi positions — remove anything that's settled
+        try:
+            live_positions = api.get_positions()
+            live_tickers = {
+                getattr(p, "ticker", None) or p.get("ticker", "")
+                for p in live_positions
+                if getattr(p, "total_traded", getattr(p, "position", 1)) != 0
+            }
+            stale = [t for t in state.get("positions", {}) if t not in live_tickers]
+            if stale:
+                for t in stale:
+                    log.info(f"✅ Settled — removing from state: {t}")
+                    state["positions"].pop(t, None)
+                notifier.send(
+                    f"✅ {len(stale)} position(s) settled & cleared from state\n"
+                    + "\n".join(f"  • {t}" for t in stale),
+                    to=telegram_to,
+                )
+        except Exception as e:
+            log.warning(f"Position sync failed (non-critical): {e}")
+
         state_mgr.save(state)
 
     markets, _ = api.get_markets(max_pages=20)
