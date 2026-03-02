@@ -26,14 +26,14 @@ strategies:
     max_yes_price: 96         # cents
     max_hours_to_close: 48    # only markets closing within 2 days
     min_volume_24h: 500       # contracts
-    max_position_usd: 20
+    max_position_usd: 10
     min_return_pct: 0.5
 
   intramarket_arb:
     enabled: true
     description: "Buy YES+NO when sum < 100 cents"
     min_gap_cents: 2          # min gap (e.g. 2 = $0.02 profit per pair)
-    max_position_usd: 50
+    max_position_usd: 10
     min_liquidity: 200
 
   momentum:
@@ -41,7 +41,7 @@ strategies:
     description: "Trade markets moving fast on high volume"
     min_volume_24h: 5000
     min_price_move_cents: 8   # min move in cents since open
-    max_position_usd: 30
+    max_position_usd: 10
 
   polymarket_tail:
     enabled: true
@@ -59,7 +59,7 @@ strategies:
     lookback_hours: 2           # only trades from last N hours
     # Execution
     copy_ratio: 0.10            # trade 10% of what whale traded
-    max_position_usd: 30
+    max_position_usd: 10
     # Horizon + price filters
     max_entry_cents: 50             # never pay more than 50¢ to enter
     long_horizon_days: 30           # markets closing further than this need lower price
@@ -73,7 +73,7 @@ strategies:
     weight_profitable_agents: true  # give more weight to agents with better track records
     require_whale_confirmation: false  # set true to only act when humans also agree
     min_whale_confirmation_usd: 300
-    max_position_usd: 25
+    max_position_usd: 10
     # Horizon + price filters
     max_entry_cents: 50             # never pay more than 50¢ to enter
     long_horizon_days: 30           # markets closing further than this need lower price
@@ -89,13 +89,13 @@ strategies:
     min_yes_price: 20           # avoid very cheap longshots
     max_yes_price: 85           # avoid near-certain markets (endgame arb handles those)
     min_signal_score: 3         # min combined signal score (max 8) to trigger
-    max_position_usd: 40
+    max_position_usd: 10
 
 # ============================================================
 # Risk Management
 # ============================================================
 risk:
   max_open_positions: 10
-  max_total_exposure_usd: 200
+  max_total_exposure_usd: 100    # 10 positions * $10 max
   stop_loss_pct: 30
-  max_daily_loss_usd: 50
+  max_daily_loss_usd: 20         # hard stop if we lose $20 in a day
