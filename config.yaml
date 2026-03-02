@@ -4,7 +4,9 @@
 paper_trading: true
 
 telegram_to: "7591705971"
-scan_interval: 60
+scan_interval: 300              # scan every 5 minutes (was 60s — reduces API hammering)
+max_alerts_per_scan: 3         # max Telegram messages per scan cycle
+health_check_interval: 600     # check API health every 10 minutes
 
 kalshi_api_host: "https://api.elections.kalshi.com/trade-api/v2"
 

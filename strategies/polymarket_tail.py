@@ -40,37 +40,29 @@ _session.headers.update(HEADERS)
 
 def get_top_traders(limit: int = 50, min_pnl: float = 1000,
                     min_win_rate: float = 55, min_trades: int = 20) -> list:
-    """
-    Fetch top-performing traders from PolymarketScan ranked by alpha_score.
-    Returns list of wallet addresses.
-    """
-    try:
+    from core.health import cached
+    def fetch():
         r = _session.get(
             f"{SUPABASE_URL}/trader_metrics_full",
             params={
                 "select": "wallet,display_name,total_pnl,roi_percent,win_rate,"
                           "alpha_score,conviction_score,trade_count,market_focus",
-                "total_pnl": f"gte.{min_pnl}",
-                "win_rate":  f"gte.{min_win_rate}",
+                "total_pnl":   f"gte.{min_pnl}",
+                "win_rate":    f"gte.{min_win_rate}",
                 "trade_count": f"gte.{min_trades}",
                 "order": "alpha_score.desc",
                 "limit": limit,
-            },
-            timeout=10,
-        )
+            }, timeout=10)
         r.raise_for_status()
         return r.json() if isinstance(r.json(), list) else []
-    except Exception as e:
-        return []
+    return cached("top_traders", ttl=300, fetch_fn=fetch) or []
 
 
 def get_whale_trades(min_usd: float = 500, limit: int = 50,
                      watch_wallets: list = None) -> list:
-    """
-    Fetch recent whale trades from PolymarketScan.
-    Optionally filter to specific wallet addresses.
-    """
-    try:
+    from core.health import cached
+    cache_key = f"whale_trades_{int(min_usd)}"
+    def fetch():
         params = {
             "select": "tx_hash,wallet,market_title,market_slug,side,outcome,"
                       "amount_usd,price,timestamp,tier,anomaly_tags",
@@ -78,30 +70,25 @@ def get_whale_trades(min_usd: float = 500, limit: int = 50,
             "order": "timestamp.desc",
             "limit": limit,
         }
-        # Filter to specific wallets if provided
         if watch_wallets:
             params["wallet"] = f"in.({','.join(watch_wallets)})"
-
         r = _session.get(f"{SUPABASE_URL}/whale_trades_cache", params=params, timeout=10)
         r.raise_for_status()
         return r.json() if isinstance(r.json(), list) else []
-    except Exception as e:
-        return []
+    return cached(cache_key, ttl=300, fetch_fn=fetch) or []
 
 
 def get_trader_stats(wallet: str) -> dict:
-    """Get detailed stats for a specific wallet."""
-    try:
+    from core.health import cached
+    cache_key = f"trader_{wallet[:10]}"
+    def fetch():
         r = _session.get(
             f"{SUPABASE_URL}/trader_metrics_full",
-            params={"wallet": f"eq.{wallet.lower()}", "limit": 1},
-            timeout=10,
-        )
+            params={"wallet": f"eq.{wallet.lower()}", "limit": 1}, timeout=10)
         r.raise_for_status()
         data = r.json()
         return data[0] if data else {}
-    except Exception:
-        return {}
+    return cached(cache_key, ttl=600, fetch_fn=fetch) or {}
 
 
 # ── Market matching ──────────────────────────────────────────────────────────
@@ -261,17 +248,7 @@ class PolymarketTailStrategy(BaseStrategy):
             kalshi_match = match_kalshi_market(pm_title, pm_slug, markets)
 
             if not kalshi_match:
-                self.log.info(f"No Kalshi match: {pm_title[:60]}")
-                # Still alert — useful intel even without Kalshi trade
-                notifier.send(
-                    f"🐋 Polymarket Whale [{tier.upper()}]\n"
-                    f"{side} ${amount_usd:,.0f} @ {price:.0%}\n"
-                    f"Outcome: {outcome}\n"
-                    f"Market: {pm_title[:80]}\n"
-                    f"{'⚡ ANOMALY: ' + ', '.join(anomaly) if anomaly else ''}\n"
-                    f"🔗 https://polymarket.com/event/{pm_slug}\n"
-                    f"_(No Kalshi match — info only)_"
-                )
+                self.log.info(f"No Kalshi match (logged only): {pm_title[:70]}")
                 continue
 
             ticker   = kalshi_match.get("ticker", "")

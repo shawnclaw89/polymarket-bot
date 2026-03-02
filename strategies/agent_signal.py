@@ -49,70 +49,57 @@ GOOD_AGENTS = {
 
 
 def get_agent_positions() -> list:
-    try:
+    from core.health import cached
+    def fetch():
         r = _session.get(
             f"{SUPABASE_URL}/agent_arena_positions",
             params={"select": "agent_id,market_slug,market_title,side,shares,avg_price",
-                    "limit": 500},
-            timeout=10,
-        )
+                    "limit": 500}, timeout=10)
         r.raise_for_status()
         return r.json() if isinstance(r.json(), list) else []
-    except Exception:
-        return []
+    return cached("agent_positions", ttl=300, fetch_fn=fetch) or []
 
 
 def get_agent_balances() -> dict:
-    """Return {agent_id: roi_pct} for all agents."""
-    try:
+    from core.health import cached
+    def fetch():
         r = _session.get(
             f"{SUPABASE_URL}/agent_arena_balances",
             params={"select": "agent_id,balance,initial_balance", "limit": 200},
-            timeout=10,
-        )
+            timeout=10)
         r.raise_for_status()
         data = r.json() if isinstance(r.json(), list) else []
         return {
             a["agent_id"]: ((a["balance"] - a["initial_balance"]) / a["initial_balance"] * 100)
             for a in data if a.get("initial_balance", 0) > 0
         }
-    except Exception:
-        return {}
+    return cached("agent_balances", ttl=300, fetch_fn=fetch) or {}
 
 
-def get_recent_whale_buys(min_usd: float = 300, hours: int = 6) -> dict:
-    """Return {market_slug: total_whale_usd} for recent BUY trades."""
-    cutoff = datetime.now(timezone.utc).isoformat()
-    try:
+def get_recent_whale_buys(min_usd: float = 300) -> dict:
+    from core.health import cached
+    def fetch():
         r = _session.get(
             f"{SUPABASE_URL}/whale_trades_cache",
-            params={
-                "select": "market_slug,amount_usd,side",
-                "side":   "eq.BUY",
-                "amount_usd": f"gte.{min_usd}",
-                "order": "timestamp.desc",
-                "limit": 200,
-            },
-            timeout=10,
-        )
+            params={"select": "market_slug,amount_usd,side",
+                    "side": "eq.BUY", "amount_usd": f"gte.{min_usd}",
+                    "order": "timestamp.desc", "limit": 200}, timeout=10)
         r.raise_for_status()
         trades = r.json() if isinstance(r.json(), list) else []
         result = defaultdict(float)
         for t in trades:
             result[t.get("market_slug", "")] += t.get("amount_usd", 0)
         return dict(result)
-    except Exception:
-        return {}
+    return cached(f"whale_buys_{int(min_usd)}", ttl=300, fetch_fn=fetch) or {}
 
 
 def get_polymarket_price(slug: str) -> float | None:
-    """Fetch current YES price from Polymarket Gamma API."""
-    try:
+    """Fetch current YES price from Polymarket Gamma API (cached 5 min)."""
+    from core.health import cached
+    def fetch():
         r = _session.get(
             "https://gamma-api.polymarket.com/markets",
-            params={"slug": slug, "limit": 1},
-            timeout=8,
-        )
+            params={"slug": slug, "limit": 1}, timeout=8)
         r.raise_for_status()
         markets = r.json()
         if not markets:
@@ -120,8 +107,7 @@ def get_polymarket_price(slug: str) -> float | None:
         prices_raw = markets[0].get("outcomePrices", "[]")
         prices = json.loads(prices_raw) if isinstance(prices_raw, str) else prices_raw
         return float(prices[0]) if prices else None
-    except Exception:
-        return None
+    return cached(f"pm_price_{slug}", ttl=300, fetch_fn=fetch)
 
 
 def match_kalshi_market(pm_title: str, pm_slug: str, kalshi_markets: list) -> dict | None:
@@ -160,6 +146,7 @@ class AgentSignalStrategy(BaseStrategy):
         positions   = get_agent_positions()
         roi_by_agent = get_agent_balances()
         whale_buys  = get_recent_whale_buys(min_usd=min_whale_usd) if require_whale_conf else {}
+
 
         if not positions:
             self.log.debug("No agent positions found.")
@@ -292,17 +279,7 @@ class AgentSignalStrategy(BaseStrategy):
             kalshi_match = match_kalshi_market(sig["title"], sig["slug"], markets)
 
             if not kalshi_match:
-                self.log.debug(f"No Kalshi match: {sig['title'][:60]}")
-                # Still alert — useful intel
-                whale_line = f"\n🐳 Whale confirmation: ${sig['whale_volume']:,.0f}" if sig["has_whale_conf"] else ""
-                notifier.send(
-                    f"🤖 Agent Bullish Signal (no Kalshi match)\n"
-                    f"{sig['title'][:80]}\n"
-                    f"Side: {sig['dominant_side']} | {sig['agent_count']} agents\n"
-                    f"Agents avg: {sig['avg_entry']:.0%} vs market: {sig['current_price']:.0%} "
-                    f"(+{sig['gap']:.0%} gap){whale_line}\n"
-                    f"🔗 https://polymarket.com/event/{sig['slug']}"
-                )
+                self.log.info(f"No Kalshi match (logged only): {sig['title'][:70]}")
                 continue
 
             ticker     = kalshi_match.get("ticker", "")
