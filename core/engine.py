@@ -83,24 +83,33 @@ def run_once(strategies, config, arb_only=False):
         state["live_balance"] = balance
 
         # ── Auto-clear settled positions ─────────────────────────────────────
-        # Sync state vs real Kalshi positions — remove anything that's settled
+        # Sync state vs real Kalshi positions — only clear if API call succeeds
         try:
             live_positions = api.get_positions()
-            live_tickers = {
-                getattr(p, "ticker", None) or p.get("ticker", "")
-                for p in live_positions
-                if getattr(p, "total_traded", getattr(p, "position", 1)) != 0
-            }
-            stale = [t for t in state.get("positions", {}) if t not in live_tickers]
-            if stale:
-                for t in stale:
-                    log.info(f"✅ Settled — removing from state: {t}")
-                    state["positions"].pop(t, None)
-                notifier.send(
-                    f"✅ {len(stale)} position(s) settled & cleared from state\n"
-                    + "\n".join(f"  • {t}" for t in stale),
-                    to=telegram_to,
-                )
+            if live_positions is not None:  # None = API error; [] = genuinely empty
+                live_tickers = set()
+                for p in live_positions:
+                    t = getattr(p, "ticker", None) or (p.get("ticker", "") if isinstance(p, dict) else "")
+                    if t:
+                        live_tickers.add(t)
+                state_tickers = set(state.get("positions", {}).keys())
+                stale = state_tickers - live_tickers
+                if stale and len(live_tickers) > 0:
+                    # Only auto-clear if Kalshi returned SOME positions
+                    # (if live_tickers is empty but we have state, it might be an API issue)
+                    for t in stale:
+                        log.info(f"✅ Settled — removing from state: {t}")
+                        state["positions"].pop(t, None)
+                    notifier.send(
+                        f"✅ {len(stale)} position(s) settled & cleared from state\n"
+                        + "\n".join(f"  • {t}" for t in stale),
+                        to=telegram_to,
+                    )
+                elif stale and len(live_tickers) == 0:
+                    log.info(
+                        f"Kalshi returned 0 live positions but state has {len(stale)} — "
+                        "skipping auto-clear (possible API gap or all positions settling)"
+                    )
         except Exception as e:
             log.warning(f"Position sync failed (non-critical): {e}")
 

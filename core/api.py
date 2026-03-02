@@ -119,7 +119,7 @@ def get_positions() -> list:
         return []
     try:
         resp = _portfolio_api.get_positions()
-        return resp.market_positions or []
+        return resp.positions or []
     except Exception as e:
         log.error(f"get_positions failed: {e}")
         return []

@@ -10,9 +10,26 @@ mkdir -p "$BOT_DIR/logs"
 
 log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*" | tee -a "$LOG"; }
 
+# Prevent duplicate watchdog/bot instances
+LOCKFILE="$BOT_DIR/logs/watchdog.lock"
+if [ -f "$LOCKFILE" ] && kill -0 "$(cat "$LOCKFILE")" 2>/dev/null; then
+    log "Another watchdog is already running (PID $(cat "$LOCKFILE")) — exiting."
+    exit 1
+fi
+echo $$ > "$LOCKFILE"
+trap "rm -f '$LOCKFILE'; exit" INT TERM EXIT
+
 log "Watchdog started (PID $$)"
 
 while true; do
+    # Kill any stray bot.py before starting a fresh one
+    existing=$(pgrep -f "python3 bot.py" 2>/dev/null | grep -v $$)
+    if [ -n "$existing" ]; then
+        log "Killing stray bot process(es): $existing"
+        kill $existing 2>/dev/null
+        sleep 2
+    fi
+
     log "Starting bot..."
     cd "$BOT_DIR"
     python3 bot.py >> "$BOT_DIR/logs/bot.log" 2>&1
