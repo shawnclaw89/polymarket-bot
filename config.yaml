@@ -43,15 +43,21 @@ strategies:
 
   polymarket_tail:
     enabled: true
-    description: "Track whale wallets on Polymarket, tail trades on Kalshi"
-    # Add profitable Polymarket wallet addresses here.
-    # Leave empty to auto-discover from high-volume market activity.
-    # Find wallets at: https://polymarketscan.org/leaderboard
+    description: "Track top Polymarket traders via PolymarketScan, tail on Kalshi"
+    # Specific wallets to watch (optional — auto-discovers top traders if empty)
+    # Copy addresses from: https://polymarketscan.org/leaderboard
     watch_wallets: []
+    # Trader quality filters (used when auto-discovering)
+    min_trader_pnl: 1000        # min lifetime profit to qualify as a whale
+    min_trader_win_rate: 55     # min win rate %
+    min_trader_trades: 20       # min number of trades
+    # Trade filters
     min_trade_usd: 500          # only tail trades >= this size
+    only_buy_side: true         # only mirror BUY trades
+    lookback_hours: 2           # only trades from last N hours
+    # Execution
     copy_ratio: 0.10            # trade 10% of what whale traded
     max_position_usd: 30
-    auto_discover_whales: true  # auto-find wallets when list is empty
 
   whale_follow:
     enabled: true

@@ -1,140 +1,142 @@
 """
-Polymarket Tail Strategy
-========================
-Uses Polymarket as a FREE signal source (read-only, no trading there),
-then executes equivalent trades on Kalshi.
+Polymarket Tail Strategy (powered by PolymarketScan)
+=====================================================
+Uses PolymarketScan's public Supabase database to:
 
-Since Polymarket is on-chain, all wallet activity is public.
-We track known profitable whale wallets via Polymarket's data API,
-detect when they open positions, then find the matching Kalshi market
-and tail the trade.
+  1. Fetch top-ranked traders by total PnL / alpha score / win rate
+  2. Watch whale_trades_cache for their latest BUY trades (live, <5 min delay)
+  3. Match Polymarket market titles → Kalshi equivalents (fuzzy keyword match)
+  4. Mirror the trade on Kalshi at a configurable copy ratio
 
-Flow:
-  1. Poll wallet activity for each watched address
-  2. Detect new BUY trades above min_trade_usd
-  3. Match the Polymarket market title → Kalshi market (fuzzy match)
-  4. Execute the same directional bet on Kalshi
-
-Config:
-  watch_wallets: list of Polygon wallet addresses to monitor
-  Use python3 bot.py --discover-whales to auto-find large traders
+Data sources (all public, no auth required):
+  - trader_metrics_full  → rank traders by alpha, PnL, win rate
+  - whale_trades_cache   → live whale trades with wallet + market info
 """
 import json
 import os
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 import requests
 
 from strategies.base import BaseStrategy
 from core import api, notifier, state as state_mgr
 
-DATA_API = "https://data-api.polymarket.com"
-GAMMA_API = "https://gamma-api.polymarket.com"
+SUPABASE_URL = "https://gzydspfquuaudqeztorw.supabase.co/rest/v1"
+ANON_KEY     = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd6eWRzcGZxdXVhdWRxZXp0b3J3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ4OTI5NjUsImV4cCI6MjA4MDQ2ODk2NX0"
+    ".97m7q4bYcy8xU-OqcuAeHytV45XFm8ddLhSu39Ztvmk"
+)
+HEADERS = {"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}"}
+
 SEEN_FILE = os.path.join(os.path.dirname(__file__), "..", "polymarket_seen.json")
 
 _session = requests.Session()
-_session.headers.update({"Accept": "application/json", "User-Agent": "kalshi-bot/1.0"})
+_session.headers.update(HEADERS)
 
 
-# ── Polymarket data helpers ──────────────────────────────────────────────────
+# ── PolymarketScan API helpers ───────────────────────────────────────────────
 
-def get_wallet_activity(address: str, limit: int = 20) -> list:
-    """Fetch recent activity for a Polymarket wallet."""
+def get_top_traders(limit: int = 50, min_pnl: float = 1000,
+                    min_win_rate: float = 55, min_trades: int = 20) -> list:
+    """
+    Fetch top-performing traders from PolymarketScan ranked by alpha_score.
+    Returns list of wallet addresses.
+    """
     try:
         r = _session.get(
-            f"{DATA_API}/activity",
-            params={"user": address.lower(), "limit": limit},
+            f"{SUPABASE_URL}/trader_metrics_full",
+            params={
+                "select": "wallet,display_name,total_pnl,roi_percent,win_rate,"
+                          "alpha_score,conviction_score,trade_count,market_focus",
+                "total_pnl": f"gte.{min_pnl}",
+                "win_rate":  f"gte.{min_win_rate}",
+                "trade_count": f"gte.{min_trades}",
+                "order": "alpha_score.desc",
+                "limit": limit,
+            },
             timeout=10,
         )
         r.raise_for_status()
         return r.json() if isinstance(r.json(), list) else []
-    except Exception:
+    except Exception as e:
         return []
 
 
-def get_wallet_positions(address: str) -> list:
-    """Fetch current open positions for a wallet."""
+def get_whale_trades(min_usd: float = 500, limit: int = 50,
+                     watch_wallets: list = None) -> list:
+    """
+    Fetch recent whale trades from PolymarketScan.
+    Optionally filter to specific wallet addresses.
+    """
+    try:
+        params = {
+            "select": "tx_hash,wallet,market_title,market_slug,side,outcome,"
+                      "amount_usd,price,timestamp,tier,anomaly_tags",
+            "amount_usd": f"gte.{min_usd}",
+            "order": "timestamp.desc",
+            "limit": limit,
+        }
+        # Filter to specific wallets if provided
+        if watch_wallets:
+            params["wallet"] = f"in.({','.join(watch_wallets)})"
+
+        r = _session.get(f"{SUPABASE_URL}/whale_trades_cache", params=params, timeout=10)
+        r.raise_for_status()
+        return r.json() if isinstance(r.json(), list) else []
+    except Exception as e:
+        return []
+
+
+def get_trader_stats(wallet: str) -> dict:
+    """Get detailed stats for a specific wallet."""
     try:
         r = _session.get(
-            f"{DATA_API}/positions",
-            params={"user": address.lower(), "sizeThreshold": 10},
+            f"{SUPABASE_URL}/trader_metrics_full",
+            params={"wallet": f"eq.{wallet.lower()}", "limit": 1},
             timeout=10,
         )
         r.raise_for_status()
-        d = r.json()
-        return d if isinstance(d, list) else []
+        data = r.json()
+        return data[0] if data else {}
     except Exception:
-        return []
-
-
-def discover_whales(min_trade_usd: float = 5000, limit: int = 200) -> list:
-    """
-    Auto-discover whale wallets by scanning Polymarket markets for large recent
-    volume and collecting the wallet addresses making big moves.
-    Returns a list of addresses sorted by trade size.
-    """
-    try:
-        r = _session.get(
-            f"{GAMMA_API}/markets",
-            params={"limit": limit, "order": "volume24hr", "active": "true", "closed": "false"},
-            timeout=15,
-        )
-        r.raise_for_status()
-        markets = r.json()
-    except Exception:
-        return []
-
-    # Collect any wallet addresses from submitted_by fields with high volume
-    whale_candidates = {}
-    for m in markets:
-        wallet = m.get("submitted_by", "")
-        vol = m.get("volumeNum", 0)
-        if wallet and vol >= min_trade_usd:
-            whale_candidates[wallet.lower()] = max(
-                whale_candidates.get(wallet.lower(), 0), vol
-            )
-
-    return sorted(whale_candidates.keys(), key=lambda w: whale_candidates[w], reverse=True)[:20]
+        return {}
 
 
 # ── Market matching ──────────────────────────────────────────────────────────
 
-def match_kalshi_market(polymarket_title: str, kalshi_markets: list) -> dict | None:
-    """
-    Fuzzy-match a Polymarket market title to a Kalshi market.
-    Returns the best match or None.
-    """
-    if not polymarket_title or not kalshi_markets:
+def match_kalshi_market(pm_title: str, pm_slug: str, kalshi_markets: list) -> dict | None:
+    """Fuzzy match Polymarket title/slug → best Kalshi market."""
+    if not pm_title or not kalshi_markets:
         return None
 
-    title_lower = polymarket_title.lower()
+    title_lower = pm_title.lower()
+    slug_lower  = (pm_slug or "").lower().replace("-", " ")
 
-    # Extract keywords (skip common words)
     stopwords = {"will", "the", "a", "an", "be", "is", "in", "on", "by", "of",
-                 "to", "or", "and", "for", "at", "it", "vs", "win", "wins"}
-    keywords = [w for w in title_lower.split() if len(w) > 2 and w not in stopwords]
+                 "to", "or", "and", "for", "at", "it", "win", "wins", "2026",
+                 "vs", "does", "did", "has", "have", "reach", "hit"}
 
-    best_match = None
-    best_score = 0
+    keywords = [w for w in (title_lower + " " + slug_lower).split()
+                if len(w) > 2 and w not in stopwords]
+
+    best, best_score = None, 0.0
 
     for km in kalshi_markets:
         km_title = (km.get("title") or "").lower()
         if not km_title:
             continue
-
-        # Count keyword hits
         hits = sum(1 for kw in keywords if kw in km_title)
         score = hits / max(len(keywords), 1)
-
-        if score > best_score and score >= 0.4:  # 40% keyword overlap minimum
+        if score > best_score and score >= 0.35:
             best_score = score
-            best_match = km
+            best = km
 
-    return best_match
+    return best
 
 
-# ── Seen trade tracking ──────────────────────────────────────────────────────
+# ── Seen tracking ────────────────────────────────────────────────────────────
 
 def load_seen() -> dict:
     if not os.path.exists(SEEN_FILE):
@@ -157,125 +159,166 @@ class PolymarketTailStrategy(BaseStrategy):
     name = "polymarket_tail"
 
     def scan(self, markets: list, state: dict, cfg: dict, paper_trading: bool):
-        watch_wallets   = cfg.get("watch_wallets", [])
-        min_trade_usd   = cfg.get("min_trade_usd", 500)
-        max_pos         = cfg.get("max_position_usd", 30)
-        copy_ratio      = cfg.get("copy_ratio", 0.1)
-        auto_discover   = cfg.get("auto_discover_whales", True)
-        risk            = state.get("_risk_config", {})
+        min_trade_usd    = cfg.get("min_trade_usd", 500)
+        max_pos          = cfg.get("max_position_usd", 30)
+        copy_ratio       = cfg.get("copy_ratio", 0.10)
+        min_trader_pnl   = cfg.get("min_trader_pnl", 1000)
+        min_win_rate     = cfg.get("min_trader_win_rate", 55)
+        min_trades       = cfg.get("min_trader_trades", 20)
+        watch_wallets    = cfg.get("watch_wallets", [])
+        only_buy         = cfg.get("only_buy_side", True)
+        risk             = state.get("_risk_config", {})
 
-        # Auto-discover whales if no wallets configured
-        if not watch_wallets and auto_discover:
-            self.log.info("No wallets configured — auto-discovering whales...")
-            watch_wallets = discover_whales(min_trade_usd=min_trade_usd)
-            if watch_wallets:
-                self.log.info(f"Discovered {len(watch_wallets)} whale candidates: "
-                              f"{[w[:10]+'...' for w in watch_wallets[:5]]}")
+        # ── Step 1: Build/use whale wallet list ──────────────────────────────
+        if not watch_wallets:
+            self.log.info("Fetching top traders from PolymarketScan...")
+            traders = get_top_traders(
+                limit=30,
+                min_pnl=min_trader_pnl,
+                min_win_rate=min_win_rate,
+                min_trades=min_trades,
+            )
+            watch_wallets = [t["wallet"] for t in traders if t.get("wallet")]
+            if traders:
+                self.log.info(
+                    f"Tracking {len(watch_wallets)} top traders | "
+                    f"Top: {traders[0].get('display_name') or traders[0]['wallet'][:10]}... "
+                    f"PnL=${traders[0].get('total_pnl',0):,.0f} "
+                    f"WR={traders[0].get('win_rate',0):.0f}%"
+                )
 
         if not watch_wallets:
-            self.log.info("No whale wallets to watch. Add addresses to config.yaml.")
+            self.log.info("No whale wallets available — skipping.")
             return
 
-        seen = load_seen()
-        new_signals = []
+        # ── Step 2: Fetch latest whale trades ────────────────────────────────
+        whale_trades = get_whale_trades(
+            min_usd=min_trade_usd,
+            limit=50,
+            watch_wallets=watch_wallets if len(watch_wallets) <= 20 else None,
+        )
 
-        for wallet in watch_wallets:
-            activity = get_wallet_activity(wallet, limit=10)
+        if not whale_trades:
+            self.log.debug("No whale trades found this tick.")
+            return
 
-            for trade in activity:
-                tx_hash  = trade.get("transactionHash", "")
-                trade_type = trade.get("type", "")
-                side     = trade.get("side", "").upper()
-                usd_size = trade.get("usdcSize", 0) or 0
-                price    = trade.get("price", 0) or 0
-                title    = trade.get("title", "")
-                slug     = trade.get("slug", "")
-                ts       = trade.get("timestamp", 0)
+        self.log.info(f"Got {len(whale_trades)} whale trades to evaluate.")
 
-                # Only look at BUY trades above threshold
-                if trade_type != "TRADE" or side != "BUY":
+        # ── Step 3: Filter unseen BUY trades ─────────────────────────────────
+        seen     = load_seen()
+        now_ts   = time.time()
+        cutoff   = now_ts - (cfg.get("lookback_hours", 2) * 3600)
+
+        new_trades = []
+        for t in whale_trades:
+            tx    = t.get("tx_hash", "")
+            side  = t.get("side", "").upper()
+            ts_str = t.get("timestamp", "")
+
+            if tx in seen:
+                continue
+            if only_buy and side != "BUY":
+                continue
+
+            # Parse timestamp
+            try:
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
+                if ts < cutoff:
                     continue
-                if usd_size < min_trade_usd:
-                    continue
+            except Exception:
+                continue
 
-                # Skip if we've already seen this transaction
-                if tx_hash and tx_hash in seen:
-                    continue
+            # Skip if wallet not in our watch list (when watch_wallets was set)
+            if cfg.get("watch_wallets") and t.get("wallet") not in watch_wallets:
+                continue
 
-                # Skip if trade is older than 2 hours
-                if ts and (time.time() - ts) > 7200:
-                    continue
+            new_trades.append(t)
+            if tx:
+                seen[tx] = int(now_ts)
 
-                new_signals.append({
-                    "wallet": wallet,
-                    "tx_hash": tx_hash,
-                    "side": side,
-                    "usd_size": usd_size,
-                    "price": price,
-                    "title": title,
-                    "slug": slug,
-                    "ts": ts,
-                })
-
-                if tx_hash:
-                    seen[tx_hash] = int(time.time())
-
-        # Prune old seen entries (older than 48h)
-        cutoff = int(time.time()) - 172800
-        seen = {k: v for k, v in seen.items() if v > cutoff}
+        # Prune seen older than 48h
+        seen = {k: v for k, v in seen.items() if v > now_ts - 172800}
         save_seen(seen)
 
-        if not new_signals:
+        if not new_trades:
+            self.log.debug("No new whale trades since last scan.")
             return
 
-        self.log.info(f"Found {len(new_signals)} new whale signals.")
+        self.log.info(f"{len(new_trades)} new whale trades found.")
 
-        for sig in new_signals[:5]:
-            # Match to Kalshi market
-            kalshi_match = match_kalshi_market(sig["title"], markets)
+        # ── Step 4: Match to Kalshi + execute ────────────────────────────────
+        for trade in new_trades[:5]:
+            wallet     = trade.get("wallet", "")
+            pm_title   = trade.get("market_title", "")
+            pm_slug    = trade.get("market_slug", "")
+            side       = trade.get("side", "BUY").upper()
+            outcome    = trade.get("outcome", "Yes")
+            amount_usd = trade.get("amount_usd", 0)
+            price      = trade.get("price", 0.5)
+            tier       = trade.get("tier", "unknown")
+            anomaly    = trade.get("anomaly_tags", [])
+
+            kalshi_match = match_kalshi_market(pm_title, pm_slug, markets)
 
             if not kalshi_match:
-                self.log.info(f"No Kalshi match for: {sig['title'][:60]}")
+                self.log.info(f"No Kalshi match: {pm_title[:60]}")
+                # Still alert — useful intel even without Kalshi trade
                 notifier.send(
-                    f"🐋 Polymarket Whale Alert (no Kalshi match)\n"
-                    f"Wallet: {sig['wallet'][:10]}...\n"
-                    f"BUY ${sig['usd_size']:,.0f} @ {sig['price']:.0%}\n"
-                    f"Market: {sig['title'][:80]}\n"
-                    f"🔗 https://polymarket.com/event/{sig['slug']}"
+                    f"🐋 Polymarket Whale [{tier.upper()}]\n"
+                    f"{side} ${amount_usd:,.0f} @ {price:.0%}\n"
+                    f"Outcome: {outcome}\n"
+                    f"Market: {pm_title[:80]}\n"
+                    f"{'⚡ ANOMALY: ' + ', '.join(anomaly) if anomaly else ''}\n"
+                    f"🔗 https://polymarket.com/event/{pm_slug}\n"
+                    f"_(No Kalshi match — info only)_"
                 )
                 continue
 
-            ticker     = kalshi_match.get("ticker", "")
-            k_title    = kalshi_match.get("title", "")
-            yes_ask    = kalshi_match.get("yes_ask", 0)
-            trade_size = min(sig["usd_size"] * copy_ratio, max_pos)
+            ticker   = kalshi_match.get("ticker", "")
+            k_title  = kalshi_match.get("title", "")
+            yes_ask  = kalshi_match.get("yes_ask", 0)
+            no_ask   = kalshi_match.get("no_ask", 0)
 
+            # Determine which side to take on Kalshi
+            kalshi_side = "YES" if outcome.lower() in ("yes", "y") else "NO"
+            entry_cents = yes_ask if kalshi_side == "YES" else no_ask
+
+            if entry_cents <= 0:
+                continue
             if self.is_already_open(state, ticker):
                 continue
+
+            trade_size = min(amount_usd * copy_ratio, max_pos)
             if not self.can_open(state, risk, trade_size):
                 break
 
-            contracts = api.usd_to_contracts(trade_size, yes_ask) if yes_ask > 0 else 0
-            url = api.market_url(ticker)
+            contracts = api.usd_to_contracts(trade_size, entry_cents)
+            url       = api.market_url(ticker)
+
+            # Get trader stats for context
+            stats = get_trader_stats(wallet)
+            trader_name = (stats.get("display_name") or wallet[:10] + "...")
+            trader_pnl  = stats.get("total_pnl", 0)
+            trader_wr   = stats.get("win_rate", 0)
 
             detail = (
-                f"Mirroring whale {sig['wallet'][:10]}...\n"
-                f"Polymarket: {sig['title'][:60]}\n"
-                f"BUY ${sig['usd_size']:,.0f} → Kalshi: {k_title[:60]}\n"
-                f"YES @ {yes_ask}¢ | Mirror size: ${trade_size:.0f}"
+                f"🐋 [{tier.upper()}] {trader_name}\n"
+                f"PnL: ${trader_pnl:,.0f} | Win rate: {trader_wr:.0f}%\n"
+                f"PM trade: {side} ${amount_usd:,.0f} @ {price:.0%} → {outcome}\n"
+                f"Kalshi: {kalshi_side} @ {entry_cents}¢ | Size: ${trade_size:.0f}\n"
+                + (f"⚡ {', '.join(anomaly)}" if anomaly else "")
             )
 
             self.log.info(
-                f"[{'PAPER' if paper_trading else 'LIVE'}] Tailing whale: "
-                f"{sig['title'][:50]} → {ticker} | ${trade_size:.0f}"
+                f"[{'PAPER' if paper_trading else 'LIVE'}] Tailing {trader_name}: "
+                f"{pm_title[:50]} → {ticker} | {kalshi_side}@{entry_cents}¢"
             )
             notifier.opportunity_alert("🐋 Polymarket Tail", k_title[:80], detail, url)
 
             if paper_trading:
                 state_mgr.open_position(state, ticker, self.name,
-                                        "YES", yes_ask, trade_size)
+                                        kalshi_side, entry_cents, trade_size)
             else:
-                if contracts > 0:
-                    api.place_order(ticker, "yes", contracts, yes_ask)
+                api.place_order(ticker, kalshi_side.lower(), contracts, entry_cents)
                 state_mgr.open_position(state, ticker, self.name,
-                                        "YES", yes_ask, trade_size)
+                                        kalshi_side, entry_cents, trade_size)
