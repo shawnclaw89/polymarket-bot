@@ -9,11 +9,12 @@ class MomentumStrategy(BaseStrategy):
     name = "momentum"
 
     def scan(self, markets, state, cfg, paper_trading):
-        min_vol       = cfg.get("min_volume_24h", 5000)
-        min_move      = cfg.get("min_price_move_cents", 8)
-        max_pos       = cfg.get("max_position_usd", 10)
-        max_entry     = cfg.get("max_entry_cents", 55)
-        risk          = state.get("_risk_config", {})
+        min_vol        = cfg.get("min_volume_24h", 5000)
+        min_move       = cfg.get("min_price_move_cents", 8)
+        max_pos        = cfg.get("max_position_usd", 10)
+        max_entry      = cfg.get("max_entry_cents", 55)
+        max_close_days = cfg.get("max_close_days", 7)
+        risk           = state.get("_risk_config", {})
 
         opps = []
         for m in markets:
@@ -23,6 +24,7 @@ class MomentumStrategy(BaseStrategy):
             last_price = m.get("last_price", 0)       # cents
             yes_ask    = m.get("yes_ask", 0)
             no_ask     = m.get("no_ask", 0)
+            close_time = m.get("close_time") or m.get("expiration_time", "")
 
             if vol < min_vol or last_price == 0:
                 continue
@@ -42,6 +44,16 @@ class MomentumStrategy(BaseStrategy):
 
             # Hard cap: no single trade above max_entry_cents
             if entry > max_entry:
+                continue
+
+            # Time horizon filter
+            passes, reason = self.passes_horizon_filter(
+                entry, close_time,
+                max_entry_cents=max_entry,
+                max_close_days=max_close_days,
+            )
+            if not passes:
+                self.log.debug(f"Skipped {ticker}: {reason}")
                 continue
 
             opps.append({

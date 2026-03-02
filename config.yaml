@@ -36,6 +36,7 @@ strategies:
     max_position_usd: 10
     min_liquidity: 200
     max_entry_cents: 55       # neither leg may exceed this price
+    max_close_days: 7         # only markets closing within 1 week
 
   momentum:
     enabled: false
@@ -44,6 +45,7 @@ strategies:
     min_price_move_cents: 8   # min move in cents since open
     max_position_usd: 10
     max_entry_cents: 55       # hard cap per trade
+    max_close_days: 7         # only markets closing within 1 week
 
   polymarket_tail:
     enabled: true
@@ -65,8 +67,9 @@ strategies:
     # Horizon + price filters
     max_whale_price: 0.50           # skip whale trades where PM price > 50¢ (no value left)
     max_entry_cents: 55             # never pay more than 55¢ on Kalshi entry
-    long_horizon_days: 30           # markets closing further than this need lower price
-    long_horizon_max_cents: 15      # if >30 days out, only enter at ≤15¢ (high return potential)
+    max_close_days: 7               # only markets closing within 1 week
+    long_horizon_days: 7            # (redundant with max_close_days but kept for compat)
+    long_horizon_max_cents: 15      # if >3d out, only enter at ≤15¢
 
   agent_signal:
     enabled: true
@@ -79,8 +82,9 @@ strategies:
     max_position_usd: 10
     # Horizon + price filters
     max_entry_cents: 55             # never pay more than 55¢ to enter
-    long_horizon_days: 30           # markets closing further than this need lower price
-    long_horizon_max_cents: 15      # if >30 days out, only enter at ≤15¢ (high return potential)
+    max_close_days: 7               # only markets closing within 1 week
+    long_horizon_days: 7            # (redundant with max_close_days but kept for compat)
+    long_horizon_max_cents: 15      # if >3d out, only enter at ≤15¢
 
   whale_follow:
     enabled: true
@@ -91,6 +95,8 @@ strategies:
     max_spread_cents: 5         # only tight-spread markets (confident pricing)
     min_yes_price: 20           # avoid very cheap longshots
     max_yes_price: 55           # hard cap — endgame_arb handles anything above this
+    max_entry_cents: 55         # checked on actual entry side (YES or NO)
+    max_close_days: 7           # only markets closing within 1 week
     min_signal_score: 3         # min combined signal score (max 8) to trigger
     max_position_usd: 10
 

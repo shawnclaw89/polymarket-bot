@@ -15,21 +15,34 @@ class IntramarketArbStrategy(BaseStrategy):
         max_pos       = cfg.get("max_position_usd", 10)
         min_liq       = cfg.get("min_liquidity", 200)
         max_leg_cents = cfg.get("max_entry_cents", 55)   # cap each leg individually
+        max_close_days = cfg.get("max_close_days", 7)
         risk          = state.get("_risk_config", {})
 
         opps = []
         for m in markets:
-            ticker  = m.get("ticker", "")
-            title   = m.get("title", "")
-            yes_ask = m.get("yes_ask", 0)
-            no_ask  = m.get("no_ask", 0)
-            liq     = m.get("liquidity", 0)
+            ticker     = m.get("ticker", "")
+            title      = m.get("title", "")
+            yes_ask    = m.get("yes_ask", 0)
+            no_ask     = m.get("no_ask", 0)
+            liq        = m.get("liquidity", 0)
+            close_time = m.get("close_time") or m.get("expiration_time", "")
 
             if yes_ask <= 0 or no_ask <= 0 or liq < min_liq:
                 continue
 
             # Skip arbs where either leg exceeds the per-trade price cap
             if yes_ask > max_leg_cents or no_ask > max_leg_cents:
+                continue
+
+            # Time horizon filter (use avg price as entry proxy)
+            avg_cents = (yes_ask + no_ask) // 2
+            passes, reason = self.passes_horizon_filter(
+                avg_cents, close_time,
+                max_entry_cents=max_leg_cents,
+                max_close_days=max_close_days,
+            )
+            if not passes:
+                self.log.debug(f"Skipped {ticker}: {reason}")
                 continue
 
             total = yes_ask + no_ask

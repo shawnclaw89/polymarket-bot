@@ -30,10 +30,12 @@ class WhaleFollowStrategy(BaseStrategy):
         max_spread_cents   = cfg.get("max_spread_cents", 5)
         # Tight spread = confident market (smart money closed the gap)
         min_volume_abs     = cfg.get("min_volume_24h", 2000)
-        max_pos            = cfg.get("max_position_usd", 40)
-        max_yes            = cfg.get("max_yes_price", 85)
+        max_pos            = cfg.get("max_position_usd", 10)
+        max_yes            = cfg.get("max_yes_price", 55)
         # Don't follow into already-near-certain markets
         min_yes            = cfg.get("min_yes_price", 20)
+        max_close_days     = cfg.get("max_close_days", 7)
+        max_entry_cents    = cfg.get("max_entry_cents", 55)
         risk               = state.get("_risk_config", {})
 
         signals = []
@@ -47,6 +49,7 @@ class WhaleFollowStrategy(BaseStrategy):
             no_ask       = m.get("no_ask", 0)
             yes_bid      = m.get("yes_bid", 0)
             last_price   = m.get("last_price", 50)
+            close_time   = m.get("close_time") or m.get("expiration_time", "")
 
             if vol_24h < min_volume_abs:
                 continue
@@ -102,8 +105,17 @@ class WhaleFollowStrategy(BaseStrategy):
             entry = yes_ask if side == "YES" else no_ask
 
             # Hard cap: never enter above max_entry_cents on either side
-            max_entry = cfg.get("max_yes_price", 55)
-            if entry > max_entry:
+            if entry > max_entry_cents:
+                continue
+
+            # Time horizon filter
+            passes, reason = self.passes_horizon_filter(
+                entry, close_time,
+                max_entry_cents=max_entry_cents,
+                max_close_days=max_close_days,
+            )
+            if not passes:
+                self.log.debug(f"Skipped {ticker}: {reason}")
                 continue
 
             signals.append({

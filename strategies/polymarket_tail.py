@@ -277,8 +277,9 @@ class PolymarketTailStrategy(BaseStrategy):
             # Horizon + price filter
             passes, reason = self.passes_horizon_filter(
                 entry_cents, close_time,
-                max_entry_cents=cfg.get("max_entry_cents", 50),
-                long_horizon_days=cfg.get("long_horizon_days", 30),
+                max_entry_cents=cfg.get("max_entry_cents", 55),
+                max_close_days=cfg.get("max_close_days", 7),
+                long_horizon_days=cfg.get("long_horizon_days", 7),
                 long_horizon_max_cents=cfg.get("long_horizon_max_cents", 15),
             )
             if not passes:

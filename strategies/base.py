@@ -41,16 +41,18 @@ class BaseStrategy(ABC):
         return True
 
     def passes_horizon_filter(self, entry_cents: int, close_time_str: str,
-                               max_entry_cents: int = 50,
-                               long_horizon_days: int = 30,
+                               max_entry_cents: int = 55,
+                               max_close_days: int = 7,
+                               long_horizon_days: int = 7,
                                long_horizon_max_cents: int = 15) -> tuple[bool, str]:
         """
-        Shared time-horizon + price filter for tail strategies.
+        Shared time-horizon + price filter for all strategies.
 
         Rules:
-          1. Entry price must be <= max_entry_cents (default 50¢)
-          2. If market closes more than long_horizon_days out,
-             entry must be <= long_horizon_max_cents (default 15¢)
+          1. Entry price must be <= max_entry_cents
+          2. Market must close within max_close_days (hard cutoff)
+          3. If market closes more than long_horizon_days out,
+             entry must be <= long_horizon_max_cents
              — further out = need higher potential return = lower price
 
         Returns (passes: bool, reason: str)
@@ -59,17 +61,23 @@ class BaseStrategy(ABC):
         if entry_cents > max_entry_cents:
             return False, f"price {entry_cents}¢ > max {max_entry_cents}¢"
 
-        # Rule 2: Time horizon price floor
         if close_time_str:
             try:
                 closes_at = datetime.fromisoformat(
                     close_time_str.replace("Z", "+00:00")
                 )
-                days_out = (closes_at - datetime.now(timezone.utc)).days
+                days_out = (closes_at - datetime.now(timezone.utc)).total_seconds() / 86400
 
+                # Rule 2: Hard time horizon cutoff
+                if days_out > max_close_days:
+                    return False, (
+                        f"closes in {days_out:.1f}d — beyond {max_close_days}d max horizon"
+                    )
+
+                # Rule 3: Long-horizon price floor (within the window)
                 if days_out > long_horizon_days and entry_cents > long_horizon_max_cents:
                     return False, (
-                        f"closes in {days_out}d (>{long_horizon_days}d) "
+                        f"closes in {days_out:.1f}d (>{long_horizon_days}d) "
                         f"but price {entry_cents}¢ > {long_horizon_max_cents}¢ max for long horizon"
                     )
             except Exception:
