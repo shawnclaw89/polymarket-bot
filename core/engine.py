@@ -10,6 +10,7 @@ STRATEGY_MODULES = {
     "endgame_arb":     "strategies.endgame_arb:EndgameArbStrategy",
     "intramarket_arb": "strategies.intramarket_arb:IntramarketArbStrategy",
     "momentum":        "strategies.momentum:MomentumStrategy",
+    "whale_follow":    "strategies.whale_follow:WhaleFollowStrategy",
     # Add new strategies here
 }
 

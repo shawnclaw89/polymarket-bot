@@ -41,6 +41,18 @@ strategies:
     min_price_move_cents: 8   # min move in cents since open
     max_position_usd: 30
 
+  whale_follow:
+    enabled: true
+    description: "Follow smart money via order flow signals (volume surge, tight spread, imbalance)"
+    min_volume_24h: 2000        # min 24h volume to consider
+    min_volume_surge_ratio: 3.0 # 24h vol must be 3x open interest
+    min_order_imbalance: 0.70   # 70%+ order book skew to one side
+    max_spread_cents: 5         # only tight-spread markets (confident pricing)
+    min_yes_price: 20           # avoid very cheap longshots
+    max_yes_price: 85           # avoid near-certain markets (endgame arb handles those)
+    min_signal_score: 3         # min combined signal score (max 8) to trigger
+    max_position_usd: 40
+
 # ============================================================
 # Risk Management
 # ============================================================
