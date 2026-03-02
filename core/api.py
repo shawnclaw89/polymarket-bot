@@ -136,6 +136,7 @@ def place_order(ticker: str, side: str, count: int, price_cents: int,
         from kalshi_python import CreateOrderRequest
         req = CreateOrderRequest(
             ticker=ticker,
+            action="buy",
             side=side,
             count=count,
             type=order_type,
