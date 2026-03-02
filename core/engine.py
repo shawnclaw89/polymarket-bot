@@ -39,7 +39,11 @@ def load_strategies(config):
     return loaded
 
 
-def run_once(strategies, config):
+ARB_STRATEGIES = {"endgame_arb", "intramarket_arb"}
+SIGNAL_STRATEGIES = {"whale_follow", "polymarket_tail", "agent_signal", "momentum"}
+
+
+def run_once(strategies, config, arb_only=False):
     paper    = config.get("paper_trading", True)
     risk     = config.get("risk", {})
     max_alerts = config.get("max_alerts_per_scan", 3)
@@ -54,10 +58,13 @@ def run_once(strategies, config):
         log.warning("Kalshi API unavailable — skipping scan.")
         return
 
-    log.info(f"--- Tick [{'PAPER' if paper else 'LIVE'}] ---")
+    if arb_only:
+        log.debug(f"--- Arb tick [{'PAPER' if paper else 'LIVE'}] ---")
+    else:
+        log.info(f"--- Full tick [{'PAPER' if paper else 'LIVE'}] ---")
 
-    # ── Balance guard (live only) ─────────────────────────────────────────────
-    if not paper:
+    # ── Balance guard (live only, full ticks only to avoid hammering API) ─────
+    if not paper and not arb_only:
         balance = api.get_balance()
         if balance is None:
             log.error("Could not fetch account balance — skipping tick.")
@@ -81,7 +88,8 @@ def run_once(strategies, config):
         log.error("No markets returned.")
         return
 
-    log.info(f"Fetched {len(markets)} markets.")
+    if not arb_only:
+        log.info(f"Fetched {len(markets)} markets.")
 
     state = state_mgr.load()
     state["_risk_config"] = risk
@@ -90,6 +98,10 @@ def run_once(strategies, config):
     notifier.begin_batch()
 
     for strategy in strategies:
+        # Fast-tick mode: only run arb strategies
+        if arb_only and strategy.name not in ARB_STRATEGIES:
+            continue
+
         # Skip PolymarketScan-dependent strategies if API is down
         if strategy.name in ("polymarket_tail", "agent_signal", "whale_follow"):
             if not health.is_polymarketscan_ok():
@@ -108,11 +120,12 @@ def run_once(strategies, config):
     state.pop("_risk_config", None)
     state_mgr.save(state)
 
-    log.info(
-        f"Positions: {state_mgr.position_count(state)} | "
-        f"Exposure: ${state_mgr.total_exposure(state):.2f} | "
-        f"Daily P&L: ${state.get('daily_pnl', 0):.2f}"
-    )
+    if not arb_only:
+        log.info(
+            f"Positions: {state_mgr.position_count(state)} | "
+            f"Exposure: ${state_mgr.total_exposure(state):.2f} | "
+            f"Daily P&L: ${state.get('daily_pnl', 0):.2f}"
+        )
 
 
 def run(once=False):
@@ -122,9 +135,10 @@ def run(once=False):
         handlers=[logging.StreamHandler(), logging.FileHandler("logs/bot.log")],
     )
 
-    config   = load_config()
-    paper    = config.get("paper_trading", True)
-    interval = config.get("scan_interval", 300)
+    config       = load_config()
+    paper        = config.get("paper_trading", True)
+    interval     = config.get("scan_interval", 300)       # full scan: signal strategies
+    arb_interval = config.get("scan_interval_arb", 30)    # fast scan: arb only
 
     # Authenticate
     authenticated = auth.init(
@@ -147,11 +161,15 @@ def run(once=False):
     health.run_checks(to=config.get("telegram_to", "7591705971"), check_interval=0)
 
     mode = "📝 PAPER" if paper else "🔴 LIVE"
-    log.info(f"Bot starting — {mode} | {len(strategies)} strategies | interval: {interval}s")
+    log.info(
+        f"Bot starting — {mode} | {len(strategies)} strategies | "
+        f"arb: {arb_interval}s | full: {interval}s"
+    )
     notifier.send(
         f"🤖 Kalshi Bot started\n"
         f"Mode: {mode}\n"
         f"Strategies: {', '.join(s.name for s in strategies)}\n"
+        f"Arb scan: every {arb_interval}s | Full scan: every {interval}s\n"
         f"Kalshi: {'✅' if health.is_kalshi_ok() else '❌'} | "
         f"PolymarketScan: {'✅' if health.is_polymarketscan_ok() else '❌'}",
         to=config.get("telegram_to", "7591705971"),
@@ -161,7 +179,16 @@ def run(once=False):
         run_once(strategies, config)
         return
 
+    last_full_scan = 0.0
     while True:
-        run_once(strategies, config)
-        log.info(f"Sleeping {interval}s...")
-        time.sleep(interval)
+        now = time.time()
+        # Full scan (all strategies) when slow interval has elapsed
+        if now - last_full_scan >= interval:
+            run_once(strategies, config, arb_only=False)
+            last_full_scan = time.time()
+        else:
+            # Fast tick — arb strategies only
+            run_once(strategies, config, arb_only=True)
+
+        log.debug(f"Sleeping {arb_interval}s (arb interval)...")
+        time.sleep(arb_interval)

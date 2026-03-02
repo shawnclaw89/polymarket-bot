@@ -4,7 +4,8 @@
 paper_trading: false
 
 telegram_to: "7591705971"
-scan_interval: 300              # scan every 5 minutes (was 60s — reduces API hammering)
+scan_interval: 300              # full scan every 5 minutes (signal strategies)
+scan_interval_arb: 30          # arb-only scan every 30s (endgame_arb + intramarket_arb)
 max_alerts_per_scan: 3         # max Telegram messages per scan cycle
 health_check_interval: 600     # check API health every 10 minutes
 
