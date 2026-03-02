@@ -11,6 +11,7 @@ STRATEGY_MODULES = {
     "intramarket_arb": "strategies.intramarket_arb:IntramarketArbStrategy",
     "momentum":        "strategies.momentum:MomentumStrategy",
     "whale_follow":    "strategies.whale_follow:WhaleFollowStrategy",
+    "polymarket_tail": "strategies.polymarket_tail:PolymarketTailStrategy",
     # Add new strategies here
 }
 

@@ -41,6 +41,18 @@ strategies:
     min_price_move_cents: 8   # min move in cents since open
     max_position_usd: 30
 
+  polymarket_tail:
+    enabled: true
+    description: "Track whale wallets on Polymarket, tail trades on Kalshi"
+    # Add profitable Polymarket wallet addresses here.
+    # Leave empty to auto-discover from high-volume market activity.
+    # Find wallets at: https://polymarketscan.org/leaderboard
+    watch_wallets: []
+    min_trade_usd: 500          # only tail trades >= this size
+    copy_ratio: 0.10            # trade 10% of what whale traded
+    max_position_usd: 30
+    auto_discover_whales: true  # auto-find wallets when list is empty
+
   whale_follow:
     enabled: true
     description: "Follow smart money via order flow signals (volume surge, tight spread, imbalance)"
