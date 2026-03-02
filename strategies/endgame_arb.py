@@ -17,8 +17,8 @@ class EndgameArbStrategy(BaseStrategy):
     name = "endgame_arb"
 
     def scan(self, markets, state, cfg, paper_trading):
-        min_yes         = cfg.get("min_yes_price", 80)       # cents — lower floor, more room
-        max_yes         = cfg.get("max_yes_price", 95)       # cents — must be < 96
+        min_yes         = cfg.get("min_yes_price", 93)       # cents
+        max_yes         = cfg.get("max_yes_price", 96)       # cents
         min_vol         = cfg.get("min_volume_24h", 500)
         max_pos         = cfg.get("max_position_usd", 20)
         min_ret         = cfg.get("min_return_pct", 0.5) / 100
