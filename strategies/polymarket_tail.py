@@ -264,6 +264,16 @@ class PolymarketTailStrategy(BaseStrategy):
             if entry_cents <= 0:
                 continue
 
+            # Filter: skip if whale paid more than max_whale_price on Polymarket
+            # (price is 0–1 scale; e.g. 0.99 = 99¢ — no value left to capture)
+            max_whale_price = cfg.get("max_whale_price", 0.50)
+            if price > max_whale_price:
+                self.log.debug(
+                    f"Skipped (whale paid {price:.0%} > max {max_whale_price:.0%}): "
+                    f"{pm_title[:60]}"
+                )
+                continue
+
             # Horizon + price filter
             passes, reason = self.passes_horizon_filter(
                 entry_cents, close_time,

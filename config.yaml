@@ -61,7 +61,8 @@ strategies:
     copy_ratio: 0.10            # trade 10% of what whale traded
     max_position_usd: 10
     # Horizon + price filters
-    max_entry_cents: 50             # never pay more than 50¢ to enter
+    max_whale_price: 0.50           # skip whale trades where PM price > 50¢ (no value left)
+    max_entry_cents: 50             # never pay more than 50¢ on Kalshi entry
     long_horizon_days: 30           # markets closing further than this need lower price
     long_horizon_max_cents: 15      # if >30 days out, only enter at ≤15¢ (high return potential)
 
