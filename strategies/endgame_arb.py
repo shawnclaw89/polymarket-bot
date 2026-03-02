@@ -23,8 +23,12 @@ class EndgameArbStrategy(BaseStrategy):
         max_pos              = cfg.get("max_position_usd", 20)
         min_ret              = cfg.get("min_return_pct", 0.5) / 100
         max_hours            = cfg.get("max_hours_to_close", 24)
-        max_hours_crypto     = cfg.get("max_hours_to_close_crypto", 2)  # tighter for crypto
         risk                 = state.get("_risk_config", {})
+
+        # Volatile categories get a much tighter window — flash crash risk
+        # Crypto at 93¢ with 2h left can flip in one candle; at <10min it's essentially done
+        TIGHT_WINDOW_CATEGORIES = {"crypto"}
+        max_mins_crypto = cfg.get("max_mins_to_close_crypto", 10)
 
         now = datetime.now(timezone.utc)
         cutoff = now + timedelta(hours=max_hours)
@@ -46,13 +50,14 @@ class EndgameArbStrategy(BaseStrategy):
             except Exception:
                 continue
 
-            # Crypto markets: tighter window (must close within 2h)
-            is_crypto = category.lower() == "crypto"
-            effective_cutoff = (now + timedelta(hours=max_hours_crypto)
-                                if is_crypto else cutoff)
-
-            if closes_at <= now or closes_at > effective_cutoff:
-                continue
+            # Volatile categories: only trade if closing within tight window (default 10 min)
+            if category.lower() in TIGHT_WINDOW_CATEGORIES:
+                crypto_cutoff = now + timedelta(minutes=max_mins_crypto)
+                if closes_at <= now or closes_at > crypto_cutoff:
+                    continue
+            else:
+                if closes_at <= now or closes_at > cutoff:
+                    continue
 
             hours_left = (closes_at - now).total_seconds() / 3600
 

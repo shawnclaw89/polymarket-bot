@@ -26,7 +26,7 @@ strategies:
     min_yes_price: 93         # cents
     max_yes_price: 96         # cents
     max_hours_to_close: 48        # default: closing within 2 days
-    max_hours_to_close_crypto: 2  # crypto only: must close within 2 hours
+    max_mins_to_close_crypto: 10  # crypto only: <10 min left = essentially settled, flash crash too late
     min_volume_24h: 500       # contracts
     max_position_usd: 20
     min_return_pct: 0.5
