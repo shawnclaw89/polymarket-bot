@@ -58,6 +58,10 @@ strategies:
     # Execution
     copy_ratio: 0.10            # trade 10% of what whale traded
     max_position_usd: 30
+    # Horizon + price filters
+    max_entry_cents: 50             # never pay more than 50¢ to enter
+    long_horizon_days: 30           # markets closing further than this need lower price
+    long_horizon_max_cents: 15      # if >30 days out, only enter at ≤15¢ (high return potential)
 
   agent_signal:
     enabled: true
@@ -68,6 +72,10 @@ strategies:
     require_whale_confirmation: false  # set true to only act when humans also agree
     min_whale_confirmation_usd: 300
     max_position_usd: 25
+    # Horizon + price filters
+    max_entry_cents: 50             # never pay more than 50¢ to enter
+    long_horizon_days: 30           # markets closing further than this need lower price
+    long_horizon_max_cents: 15      # if >30 days out, only enter at ≤15¢ (high return potential)
 
   whale_follow:
     enabled: true

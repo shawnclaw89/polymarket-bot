@@ -305,14 +305,27 @@ class AgentSignalStrategy(BaseStrategy):
                 )
                 continue
 
-            ticker   = kalshi_match.get("ticker", "")
-            k_title  = kalshi_match.get("title", "")
-            yes_ask  = kalshi_match.get("yes_ask", 0)
-            no_ask   = kalshi_match.get("no_ask", 0)
+            ticker     = kalshi_match.get("ticker", "")
+            k_title    = kalshi_match.get("title", "")
+            yes_ask    = kalshi_match.get("yes_ask", 0)
+            no_ask     = kalshi_match.get("no_ask", 0)
+            close_time = kalshi_match.get("close_time") or kalshi_match.get("expiration_time", "")
 
             entry_cents = yes_ask if sig["dominant_side"] == "YES" else no_ask
             if entry_cents <= 0:
                 continue
+
+            # Horizon + price filter
+            passes, reason = self.passes_horizon_filter(
+                entry_cents, close_time,
+                max_entry_cents=cfg.get("max_entry_cents", 50),
+                long_horizon_days=cfg.get("long_horizon_days", 30),
+                long_horizon_max_cents=cfg.get("long_horizon_max_cents", 15),
+            )
+            if not passes:
+                self.log.debug(f"Skipped {ticker}: {reason}")
+                continue
+
             if self.is_already_open(state, ticker):
                 continue
             if not self.can_open(state, risk, max_pos):

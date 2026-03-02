@@ -278,6 +278,7 @@ class PolymarketTailStrategy(BaseStrategy):
             k_title  = kalshi_match.get("title", "")
             yes_ask  = kalshi_match.get("yes_ask", 0)
             no_ask   = kalshi_match.get("no_ask", 0)
+            close_time = kalshi_match.get("close_time") or kalshi_match.get("expiration_time", "")
 
             # Determine which side to take on Kalshi
             kalshi_side = "YES" if outcome.lower() in ("yes", "y") else "NO"
@@ -285,6 +286,18 @@ class PolymarketTailStrategy(BaseStrategy):
 
             if entry_cents <= 0:
                 continue
+
+            # Horizon + price filter
+            passes, reason = self.passes_horizon_filter(
+                entry_cents, close_time,
+                max_entry_cents=cfg.get("max_entry_cents", 50),
+                long_horizon_days=cfg.get("long_horizon_days", 30),
+                long_horizon_max_cents=cfg.get("long_horizon_max_cents", 15),
+            )
+            if not passes:
+                self.log.debug(f"Skipped {ticker}: {reason}")
+                continue
+
             if self.is_already_open(state, ticker):
                 continue
 
