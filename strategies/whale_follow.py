@@ -153,7 +153,8 @@ class WhaleFollowStrategy(BaseStrategy):
                 state_mgr.open_position(state, sig["ticker"], self.name,
                                         sig["side"], sig["entry_cents"], max_pos)
             else:
-                api.place_order(sig["ticker"], sig["side"].lower(),
-                                contracts, sig["entry_cents"])
-                state_mgr.open_position(state, sig["ticker"], self.name,
-                                        sig["side"], sig["entry_cents"], max_pos)
+                order = api.place_order(sig["ticker"], sig["side"].lower(),
+                                        contracts, sig["entry_cents"])
+                if order is not None:
+                    state_mgr.open_position(state, sig["ticker"], self.name,
+                                            sig["side"], sig["entry_cents"], max_pos)

@@ -98,6 +98,7 @@ class EndgameArbStrategy(BaseStrategy):
                 state_mgr.open_position(state, opp["ticker"], self.name,
                                         "YES", opp["yes_ask"], max_pos)
             else:
-                api.place_order(opp["ticker"], "yes", contracts, opp["yes_ask"])
-                state_mgr.open_position(state, opp["ticker"], self.name,
-                                        "YES", opp["yes_ask"], max_pos)
+                order = api.place_order(opp["ticker"], "yes", contracts, opp["yes_ask"])
+                if order is not None:
+                    state_mgr.open_position(state, opp["ticker"], self.name,
+                                            "YES", opp["yes_ask"], max_pos)

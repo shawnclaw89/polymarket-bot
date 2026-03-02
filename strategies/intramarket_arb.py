@@ -87,8 +87,9 @@ class IntramarketArbStrategy(BaseStrategy):
                 state_mgr.open_position(state, opp["ticker"], self.name,
                                         "BOTH", avg_price, max_pos)
             else:
-                api.place_order(opp["ticker"], "yes", yes_contracts, opp["yes_ask"])
-                api.place_order(opp["ticker"], "no",  no_contracts,  opp["no_ask"])
-                avg_price = (opp["yes_ask"] + opp["no_ask"]) / 2
-                state_mgr.open_position(state, opp["ticker"], self.name,
-                                        "BOTH", avg_price, max_pos)
+                o_yes = api.place_order(opp["ticker"], "yes", yes_contracts, opp["yes_ask"])
+                o_no  = api.place_order(opp["ticker"], "no",  no_contracts,  opp["no_ask"])
+                if o_yes is not None and o_no is not None:
+                    avg_price = (opp["yes_ask"] + opp["no_ask"]) / 2
+                    state_mgr.open_position(state, opp["ticker"], self.name,
+                                            "BOTH", avg_price, max_pos)

@@ -85,6 +85,7 @@ class MomentumStrategy(BaseStrategy):
                                         opp["side"], opp["entry_cents"], max_pos)
             else:
                 side_key = opp["side"].lower()
-                api.place_order(opp["ticker"], side_key, contracts, opp["entry_cents"])
-                state_mgr.open_position(state, opp["ticker"], self.name,
-                                        opp["side"], opp["entry_cents"], max_pos)
+                order = api.place_order(opp["ticker"], side_key, contracts, opp["entry_cents"])
+                if order is not None:
+                    state_mgr.open_position(state, opp["ticker"], self.name,
+                                            opp["side"], opp["entry_cents"], max_pos)

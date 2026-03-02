@@ -145,10 +145,10 @@ def place_order(ticker: str, side: str, count: int, price_cents: int,
         )
         resp = _portfolio_api.create_order(req)
         log.info(f"Order placed: {ticker} {side} {count}x @ {price_cents}¢")
-        return resp.to_dict() if hasattr(resp, "to_dict") else {}
+        return resp.to_dict() if hasattr(resp, "to_dict") else {"ok": True}
     except Exception as e:
         log.error(f"place_order failed: {e}")
-        return {}
+        return None  # None = failed; {} or dict = success
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

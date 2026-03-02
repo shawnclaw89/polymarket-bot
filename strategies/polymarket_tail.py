@@ -320,6 +320,7 @@ class PolymarketTailStrategy(BaseStrategy):
                 state_mgr.open_position(state, ticker, self.name,
                                         kalshi_side, entry_cents, trade_size)
             else:
-                api.place_order(ticker, kalshi_side.lower(), contracts, entry_cents)
-                state_mgr.open_position(state, ticker, self.name,
-                                        kalshi_side, entry_cents, trade_size)
+                order = api.place_order(ticker, kalshi_side.lower(), contracts, entry_cents)
+                if order is not None:
+                    state_mgr.open_position(state, ticker, self.name,
+                                            kalshi_side, entry_cents, trade_size)

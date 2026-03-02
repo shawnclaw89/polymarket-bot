@@ -331,6 +331,7 @@ class AgentSignalStrategy(BaseStrategy):
                 state_mgr.open_position(state, ticker, self.name,
                                         sig["dominant_side"], entry_cents, max_pos)
             else:
-                api.place_order(ticker, sig["dominant_side"].lower(), contracts, entry_cents)
-                state_mgr.open_position(state, ticker, self.name,
-                                        sig["dominant_side"], entry_cents, max_pos)
+                order = api.place_order(ticker, sig["dominant_side"].lower(), contracts, entry_cents)
+                if order is not None:
+                    state_mgr.open_position(state, ticker, self.name,
+                                            sig["dominant_side"], entry_cents, max_pos)
