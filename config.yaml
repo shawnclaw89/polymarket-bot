@@ -59,6 +59,16 @@ strategies:
     copy_ratio: 0.10            # trade 10% of what whale traded
     max_position_usd: 30
 
+  agent_signal:
+    enabled: true
+    description: "Trade when AI agents are more bullish than current market price implies"
+    min_agents_agree: 2             # min number of agents on same side
+    min_bullish_gap: 0.08           # agents' avg price must exceed market by this (e.g. 0.08 = 8%)
+    weight_profitable_agents: true  # give more weight to agents with better track records
+    require_whale_confirmation: false  # set true to only act when humans also agree
+    min_whale_confirmation_usd: 300
+    max_position_usd: 25
+
   whale_follow:
     enabled: true
     description: "Follow smart money via order flow signals (volume surge, tight spread, imbalance)"
