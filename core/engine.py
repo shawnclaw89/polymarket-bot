@@ -83,7 +83,7 @@ def run_once(strategies, config, arb_only=False):
         state["live_balance"] = balance
         state_mgr.save(state)
 
-    markets, _ = api.get_markets(limit=200)
+    markets, _ = api.get_markets(max_pages=20)
     if not markets:
         log.error("No markets returned.")
         return

@@ -22,33 +22,39 @@ _markets_api   = None
 
 # ── Public market data (no auth needed) ─────────────────────────────────────
 
-def get_markets(limit=200, status="open", cursor=None):
+def get_markets(limit=200, status="open", cursor=None, max_pages=20):
     """
-    Fetch open binary markets via the /events endpoint.
+    Fetch ALL open binary markets via the /events endpoint.
     The /markets endpoint returns MVE parlay markets only.
     Real standalone binary markets live under /events with nested markets.
+    Paginates up to max_pages (default: fetch everything).
     """
-    params = {
-        "limit": min(limit, 200),
-        "status": status,
-        "with_nested_markets": "true",
-    }
-    if cursor:
-        params["cursor"] = cursor
-    try:
-        resp = _session.get(f"{KALSHI_HOST}/events", params=params, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        markets = []
-        for event in data.get("events", []):
-            cat = event.get("category", "")
-            for m in event.get("markets", []):
-                m["_category"] = cat
-                markets.append(m)
-        return markets, data.get("cursor")
-    except Exception as e:
-        log.error(f"get_markets failed: {e}")
-        return [], None
+    all_markets = []
+    cur = cursor
+    for _ in range(max_pages):
+        params = {
+            "limit": 200,
+            "status": status,
+            "with_nested_markets": "true",
+        }
+        if cur:
+            params["cursor"] = cur
+        try:
+            resp = _session.get(f"{KALSHI_HOST}/events", params=params, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            for event in data.get("events", []):
+                cat = event.get("category", "")
+                for m in event.get("markets", []):
+                    m["_category"] = cat
+                    all_markets.append(m)
+            cur = data.get("cursor")
+            if not cur:
+                break
+        except Exception as e:
+            log.error(f"get_markets failed: {e}")
+            break
+    return all_markets, cur
 
 
 def get_market(ticker: str) -> dict:
