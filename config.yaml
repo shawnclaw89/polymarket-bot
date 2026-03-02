@@ -19,9 +19,10 @@ strategies:
 
   endgame_arb:
     enabled: true
-    description: "Buy near-certain markets before resolution"
-    min_yes_price: 95         # cents (95 = $0.95)
-    max_yes_price: 99         # cents
+    description: "Buy near-certain markets that are ending soon"
+    min_yes_price: 80         # cents — lower floor for more opportunities
+    max_yes_price: 95         # cents — must be < 96¢
+    max_hours_to_close: 24    # only markets closing within this many hours
     min_volume_24h: 500       # contracts
     max_position_usd: 20
     min_return_pct: 0.5
