@@ -64,11 +64,11 @@ strategies:
     only_buy_side: true         # only mirror BUY trades
     lookback_hours: 2           # only trades from last N hours
     # Execution
-    copy_ratio: 0.10            # trade 10% of what whale traded
-    max_position_usd: 10
+    copy_ratio: 0.15            # trade 15% of what whale traded
+    max_position_usd: 25        # heavier — sports 1:1 payouts worth bigger size
     # Horizon + price filters
-    max_whale_price: 0.50           # skip whale trades where PM price > 50¢ (no value left)
-    max_entry_cents: 55             # never pay more than 55¢ on Kalshi entry
+    max_whale_price: 0.65           # allow up to 65¢ on PM (sports games often 55-65¢, still meaningful upside)
+    max_entry_cents: 60             # allow up to 60¢ Kalshi entry for sports near-even markets
     max_close_days: 7               # only markets closing within 1 week
     long_horizon_days: 7            # (redundant with max_close_days but kept for compat)
     long_horizon_max_cents: 15      # if >3d out, only enter at ≤15¢

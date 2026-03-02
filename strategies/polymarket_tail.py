@@ -91,25 +91,179 @@ def get_trader_stats(wallet: str) -> dict:
     return cached(cache_key, ttl=600, fetch_fn=fetch) or {}
 
 
+# ── Team name aliases (Polymarket names → tokens that appear in Kalshi titles) ──
+# Kalshi often abbreviates: "Los Angeles D" = Dodgers, "Chicago C" = Cubs, etc.
+TEAM_ALIASES = {
+    # MLB
+    "yankees": ["new york y", "yankee"],
+    "mets":    ["new york m", "mets"],
+    "red sox": ["boston", "red sox"],
+    "cubs":    ["chicago c", "cubs"],
+    "white sox": ["chicago w", "white sox"],
+    "dodgers": ["los angeles d", "dodger"],
+    "angels":  ["los angeles a", "angel"],
+    "athletics": ["oakland", "a's", "sacramento"],
+    "padres":  ["san diego", "padre"],
+    "giants":  ["san francisco", "giant"],
+    "mariners":["seattle", "mariner"],
+    "phillies":["philadelphia", "philli"],
+    "rays":    ["tampa bay", "ray"],
+    "twins":   ["minnesota", "twin"],
+    "astros":  ["houston", "astro"],
+    "orioles": ["baltimore", "oriole"],
+    "guardians":["cleveland", "guardian"],
+    "brewers": ["milwaukee", "brewer"],
+    "diamondbacks":["arizona", "diamondback", "d-back"],
+    "braves":  ["atlanta", "brave"],
+    "cardinals":["st. louis", "cardinal"],
+    "reds":    ["cincinnati", "reds"],
+    "pirates": ["pittsburgh", "pirate"],
+    "rockies": ["colorado", "rocki"],
+    "royals":  ["kansas city", "royal"],
+    "tigers":  ["detroit", "tiger"],
+    "indians": ["cleveland"],
+    "rangers": ["texas", "ranger"],
+    # NBA
+    "celtics": ["boston", "celtic"],
+    "lakers":  ["los angeles l", "laker"],
+    "clippers":["los angeles c", "clipper"],
+    "warriors":["golden state", "warrior"],
+    "bucks":   ["milwaukee", "buck"],
+    "heat":    ["miami", "heat"],
+    "76ers":   ["philadelphia", "76er", "sixer"],
+    "nets":    ["brooklyn", "net"],
+    "knicks":  ["new york k", "knick"],
+    "bulls":   ["chicago", "bull"],
+    "cavaliers":["cleveland", "cavalier", "cavs"],
+    "raptors": ["toronto", "raptor"],
+    "pacers":  ["indiana", "pacer"],
+    "hawks":   ["atlanta", "hawk"],
+    "hornets": ["charlotte", "hornet"],
+    "magic":   ["orlando", "magic"],
+    "pistons": ["detroit", "piston"],
+    "wizards": ["washington", "wizard"],
+    "nuggets": ["denver", "nugget"],
+    "thunder": ["oklahoma", "thunder"],
+    "jazz":    ["utah", "jazz"],
+    "trail blazers":["portland", "blazer"],
+    "suns":    ["phoenix", "sun"],
+    "spurs":   ["san antonio", "spur"],
+    "mavericks":["dallas", "maverick"],
+    "rockets": ["houston", "rocket"],
+    "grizzlies":["memphis", "grizzl"],
+    "pelicans":["new orleans", "pelican"],
+    "timberwolves":["minnesota", "timberwolf", "wolves"],
+    "kings":   ["sacramento", "king"],
+    # NFL
+    "patriots":["new england", "patriot"],
+    "bills":   ["buffalo", "bill"],
+    "dolphins":["miami", "dolphin"],
+    "jets":    ["new york j", "jets"],
+    "ravens":  ["baltimore", "raven"],
+    "steelers":["pittsburgh", "steeler"],
+    "browns":  ["cleveland", "brown"],
+    "bengals": ["cincinnati", "bengal"],
+    "chiefs":  ["kansas city", "chief"],
+    "raiders": ["las vegas", "raider"],
+    "chargers":["los angeles ch", "charger"],
+    "broncos": ["denver", "bronco"],
+    "cowboys": ["dallas", "cowboy"],
+    "giants_nfl":["new york g", "giant"],
+    "eagles":  ["philadelphia", "eagle"],
+    "commanders":["washington", "commander"],
+    "bears":   ["chicago", "bear"],
+    "vikings": ["minnesota", "viking"],
+    "lions":   ["detroit", "lion"],
+    "packers": ["green bay", "packer"],
+    "seahawks":["seattle", "seahawk"],
+    "49ers":   ["san francisco", "49er"],
+    "rams":    ["los angeles r", "rams"],
+    "cardinals_nfl":["arizona", "cardinal"],
+    "falcons": ["atlanta", "falcon"],
+    "saints":  ["new orleans", "saint"],
+    "buccaneers":["tampa bay", "buccaneer"],
+    "panthers":["carolina", "panther"],
+    "jaguars": ["jacksonville", "jaguar"],
+    "titans":  ["tennessee", "titan"],
+    "colts":   ["indianapolis", "colt"],
+    "texans":  ["houston", "texan"],
+}
+
+SPORTS_STOPWORDS = {
+    "will", "the", "a", "an", "be", "is", "in", "on", "by", "of", "to",
+    "or", "and", "for", "at", "it", "win", "wins", "2026", "vs", "does",
+    "did", "has", "have", "reach", "hit", "who", "which", "team", "game",
+    "winner", "moneyline", "spread", "o/u", "over", "under", "points",
+    "series", "match",
+}
+
+
+def extract_team_tokens(text: str) -> list[str]:
+    """
+    Given a market title like 'Celtics vs. Bucks' or 'Will the Celtics beat the Bucks?',
+    return candidate Kalshi title tokens for each team found.
+    Returns list of token-lists: [[celtics tokens], [bucks tokens]]
+    """
+    text_lower = text.lower()
+    found = []
+    for team_name, aliases in TEAM_ALIASES.items():
+        if team_name in text_lower or any(a in text_lower for a in aliases):
+            found.append(aliases)
+    return found
+
+
+def is_sports_title(pm_title: str, pm_slug: str) -> bool:
+    """Heuristic: detect if this is a sports game market."""
+    combined = (pm_title + " " + pm_slug).lower()
+    sports_hints = [
+        " vs ", " vs. ", "winner", "moneyline", "spread", "o/u",
+        "nba", "nfl", "mlb", "nhl", "soccer", "tennis",
+    ]
+    team_hit = any(t in combined for t in TEAM_ALIASES)
+    hint_hit = any(h in combined for h in sports_hints)
+    return team_hit or hint_hit
+
+
 # ── Market matching ──────────────────────────────────────────────────────────
 
 def match_kalshi_market(pm_title: str, pm_slug: str, kalshi_markets: list) -> dict | None:
-    """Fuzzy match Polymarket title/slug → best Kalshi market."""
+    """
+    Match Polymarket title/slug → best Kalshi market.
+    Uses sports-aware entity matching for game titles, falls back to keyword scoring.
+    """
     if not pm_title or not kalshi_markets:
         return None
 
     title_lower = pm_title.lower()
-    slug_lower  = (pm_slug or "").lower().replace("-", " ")
 
-    stopwords = {"will", "the", "a", "an", "be", "is", "in", "on", "by", "of",
-                 "to", "or", "and", "for", "at", "it", "win", "wins", "2026",
-                 "vs", "does", "did", "has", "have", "reach", "hit"}
+    # ── Sports path: entity-based matching ───────────────────────────────────
+    if is_sports_title(pm_title, pm_slug):
+        team_token_sets = extract_team_tokens(pm_title + " " + pm_slug)
+        if len(team_token_sets) >= 2:
+            # Score candidates by how many team alias tokens they contain
+            best, best_score = None, 0
+            for km in kalshi_markets:
+                if km.get("_category", "").lower() not in ("sports",):
+                    continue
+                km_title = (km.get("title") or "").lower()
+                # Count how many team sets have at least one alias hit
+                hits = sum(
+                    1 for aliases in team_token_sets
+                    if any(a in km_title for a in aliases)
+                )
+                if hits > best_score:
+                    best_score = hits
+                    best = km
+            # Require at least 2 team hits for a sports match
+            if best and best_score >= 2:
+                return best
 
+    # ── Generic path: keyword overlap ────────────────────────────────────────
+    slug_lower = (pm_slug or "").lower().replace("-", " ")
     keywords = [w for w in (title_lower + " " + slug_lower).split()
-                if len(w) > 2 and w not in stopwords]
+                if len(w) > 2 and w not in SPORTS_STOPWORDS]
 
     best, best_score = None, 0.0
-
     for km in kalshi_markets:
         km_title = (km.get("title") or "").lower()
         if not km_title:
