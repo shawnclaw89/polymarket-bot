@@ -306,7 +306,7 @@ class AgentSignalStrategy(BaseStrategy):
 
             if self.is_already_open(state, ticker):
                 continue
-            if not self.can_open(state, risk, max_pos):
+            if not self.can_open(state, risk, max_pos, cfg):
                 break
 
             contracts = api.usd_to_contracts(max_pos, entry_cents)

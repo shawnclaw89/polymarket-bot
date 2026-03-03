@@ -87,7 +87,7 @@ class EndgameArbStrategy(BaseStrategy):
         opps.sort(key=lambda x: x["hours_left"])
 
         for opp in opps[:3]:
-            if not self.can_open(state, risk, max_pos):
+            if not self.can_open(state, risk, max_pos, cfg):
                 break
 
             contracts = api.usd_to_contracts(max_pos, opp["yes_ask"])

@@ -65,7 +65,7 @@ class IntramarketArbStrategy(BaseStrategy):
         opps.sort(key=lambda x: x["gap"], reverse=True)
 
         for opp in opps[:3]:
-            if not self.can_open(state, risk, max_pos):
+            if not self.can_open(state, risk, max_pos, cfg):
                 break
 
             # Buy both sides

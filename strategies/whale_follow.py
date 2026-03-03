@@ -132,7 +132,7 @@ class WhaleFollowStrategy(BaseStrategy):
         signals.sort(key=lambda x: x["score"], reverse=True)
 
         for sig in signals[:3]:
-            if not self.can_open(state, risk, max_pos):
+            if not self.can_open(state, risk, max_pos, cfg):
                 break
 
             contracts = api.usd_to_contracts(max_pos, sig["entry_cents"])

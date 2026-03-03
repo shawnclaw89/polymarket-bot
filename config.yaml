@@ -29,6 +29,7 @@ strategies:
     max_mins_to_close_crypto: 10  # crypto only: <10 min left = essentially settled, flash crash too late
     min_volume_24h: 500       # contracts
     max_position_usd: 20
+    max_strategy_exposure_usd: 250  # endgame arb capped at $250 total regardless of global limit
     min_return_pct: 0.5
 
   intramarket_arb:
@@ -106,7 +107,7 @@ strategies:
 # Risk Management
 # ============================================================
 risk:
-  max_open_positions: 10
-  max_total_exposure_usd: 140    # up to ~3 arb ($40) + some signal ($10) positions
+  max_open_positions: 20
+  max_total_exposure_usd: 500    # $500 total; endgame_arb capped at $250 via strategy config
   stop_loss_pct: 30
-  max_daily_loss_usd: 20         # hard stop if we lose $20 in a day
+  max_daily_loss_usd: 50         # hard stop if we lose $50 in a day

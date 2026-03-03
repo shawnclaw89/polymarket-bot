@@ -444,7 +444,7 @@ class PolymarketTailStrategy(BaseStrategy):
                 continue
 
             trade_size = min(amount_usd * copy_ratio, max_pos)
-            if not self.can_open(state, risk, trade_size):
+            if not self.can_open(state, risk, trade_size, cfg):
                 break
 
             contracts = api.usd_to_contracts(trade_size, entry_cents)

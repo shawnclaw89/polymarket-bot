@@ -65,7 +65,7 @@ class MomentumStrategy(BaseStrategy):
         opps.sort(key=lambda x: x["move"], reverse=True)
 
         for opp in opps[:2]:
-            if not self.can_open(state, risk, max_pos):
+            if not self.can_open(state, risk, max_pos, cfg):
                 break
 
             contracts = api.usd_to_contracts(max_pos, opp["entry_cents"])

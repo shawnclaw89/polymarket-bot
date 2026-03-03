@@ -28,16 +28,35 @@ class BaseStrategy(ABC):
     def is_already_open(self, state, ticker):
         return ticker in state.get("positions", {})
 
-    def can_open(self, state, risk, size_usd):
-        if state_mgr.position_count(state) >= risk.get("max_open_positions", 10):
+    def strategy_exposure(self, state) -> float:
+        """Total USD currently deployed by THIS strategy."""
+        return sum(
+            p.get("size_usd", 0)
+            for p in state.get("positions", {}).values()
+            if p.get("strategy") == self.name
+        )
+
+    def can_open(self, state, risk, size_usd, cfg=None):
+        if state_mgr.position_count(state) >= risk.get("max_open_positions", 20):
             self.log.debug("Max positions reached.")
             return False
-        if state_mgr.total_exposure(state) + size_usd > risk.get("max_total_exposure_usd", 200):
-            self.log.debug("Max exposure reached.")
+        if state_mgr.total_exposure(state) + size_usd > risk.get("max_total_exposure_usd", 500):
+            self.log.debug("Max total exposure reached.")
             return False
         if state.get("daily_pnl", 0) <= -risk.get("max_daily_loss_usd", 50):
             self.log.warning("Daily loss limit hit.")
             return False
+        # Per-strategy exposure cap (optional — set max_strategy_exposure_usd in strategy cfg)
+        if cfg is not None:
+            strat_cap = cfg.get("max_strategy_exposure_usd")
+            if strat_cap is not None:
+                strat_exposure = self.strategy_exposure(state)
+                if strat_exposure + size_usd > strat_cap:
+                    self.log.debug(
+                        f"Strategy exposure cap: ${strat_exposure:.0f} + ${size_usd:.0f}"
+                        f" > ${strat_cap:.0f} limit for {self.name}"
+                    )
+                    return False
         # Live balance guard: refuse trade if it would exceed available funds
         live_balance = state.get("live_balance")
         if live_balance is not None and size_usd > live_balance:
