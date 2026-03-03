@@ -4,125 +4,60 @@
 paper_trading: false
 
 telegram_to: "7591705971"
-scan_interval: 300              # full scan every 5 minutes (signal strategies)
-scan_interval_arb: 30          # arb-only scan every 30s (endgame_arb + intramarket_arb)
-max_alerts_per_scan: 3         # max Telegram messages per scan cycle
+scan_interval: 300              # full scan every 5 minutes
+scan_interval_arb: 30          # arb-only scan every 30s (unused — no arb strategies active)
+max_alerts_per_scan: 5         # max Telegram messages per scan cycle
 health_check_interval: 600     # check API health every 10 minutes
 
 kalshi_api_host: "https://api.elections.kalshi.com/trade-api/v2"
 
-# API Key auth (RSA) — fill in after generating keys (see README)
 api_key_id: "6936d363-c349-4f3e-b529-9035387deac5"
 private_key_path: "kalshi_private_key.pem"
 
 # ============================================================
-# Strategies
+# Strategies — only public_fade is active
 # ============================================================
 strategies:
 
   endgame_arb:
-    enabled: true
-    description: "Buy near-certain markets that are ending soon"
-    min_yes_price: 93         # cents
-    max_yes_price: 96         # cents
-    max_hours_to_close: 48        # default: closing within 2 days
-    max_mins_to_close_crypto: 10  # crypto only: <10 min left = essentially settled, flash crash too late
-    min_volume_24h: 500       # contracts
-    max_position_usd: 20
-    max_strategy_exposure_usd: 250  # endgame arb capped at $250 total regardless of global limit
-    min_return_pct: 0.5
+    enabled: false
 
   intramarket_arb:
-    enabled: true
-    description: "Buy YES+NO when sum < 100 cents"
-    min_gap_cents: 2          # min gap (e.g. 2 = $0.02 profit per pair)
-    max_position_usd: 40
-    min_liquidity: 200
-    max_entry_cents: 55       # neither leg may exceed this price
-    max_close_days: 7         # only markets closing within 1 week
+    enabled: false
 
   momentum:
     enabled: false
-    description: "Trade markets moving fast on high volume"
-    min_volume_24h: 5000
-    min_price_move_cents: 8   # min move in cents since open
-    max_position_usd: 10
-    max_entry_cents: 55       # hard cap per trade
-    max_close_days: 7         # only markets closing within 1 week
 
   polymarket_tail:
-    enabled: true
-    description: "Track top Polymarket traders via PolymarketScan, tail on Kalshi"
-    # Specific wallets to watch (optional — auto-discovers top traders if empty)
-    # Copy addresses from: https://polymarketscan.org/leaderboard
-    watch_wallets: []
-    # Trader quality filters (used when auto-discovering)
-    min_trader_pnl: 1000        # min lifetime profit to qualify as a whale
-    min_trader_win_rate: 55     # min win rate %
-    min_trader_trades: 20       # min number of trades
-    # Trade filters
-    min_trade_usd: 500          # only tail trades >= this size
-    only_buy_side: true         # only mirror BUY trades
-    lookback_hours: 2           # only trades from last N hours
-    # Execution
-    copy_ratio: 0.15            # trade 15% of what whale traded
-    max_position_usd: 25        # heavier — sports 1:1 payouts worth bigger size
-    # Horizon + price filters
-    max_whale_price: 0.65           # allow up to 65¢ on PM (sports games often 55-65¢, still meaningful upside)
-    max_entry_cents: 60             # allow up to 60¢ Kalshi entry for sports near-even markets
-    max_close_days: 7               # only markets closing within 1 week
-    long_horizon_days: 7            # (redundant with max_close_days but kept for compat)
-    long_horizon_max_cents: 15      # if >3d out, only enter at ≤15¢
+    enabled: false
 
   agent_signal:
-    enabled: true
-    description: "Trade when AI agents are more bullish than current market price implies"
-    min_agents_agree: 2             # min number of agents on same side
-    min_bullish_gap: 0.08           # agents' avg price must exceed market by this (e.g. 0.08 = 8%)
-    weight_profitable_agents: true  # give more weight to agents with better track records
-    require_whale_confirmation: false  # set true to only act when humans also agree
-    min_whale_confirmation_usd: 300
-    max_position_usd: 10
-    # Horizon + price filters
-    max_entry_cents: 55             # never pay more than 55¢ to enter
-    max_close_days: 7               # only markets closing within 1 week
-    long_horizon_days: 7            # (redundant with max_close_days but kept for compat)
-    long_horizon_max_cents: 15      # if >3d out, only enter at ≤15¢
+    enabled: false
+
+  whale_follow:
+    enabled: false
 
   public_fade:
     enabled: true
     description: "Fade the public on sports favorites, confirmed by Polymarket whale activity"
     # Kalshi YES price range indicating public overbetting (cents)
-    min_yes_price: 63       # below this = not enough public lean to fade
-    max_yes_price: 80       # above this = genuine lock, not public bias
-    max_hours_to_close: 48  # game must start/end within 48h
-    min_volume_24h: 1000    # need real liquidity
+    min_yes_price: 63           # below this = not enough public lean to fade
+    max_yes_price: 80           # above this = genuine lock, not public bias
+    max_hours_to_close: 48      # game must be within 48h
+    min_volume_24h: 1000        # need real liquidity
     # Whale confirmation (Polymarket)
     whale_lookback_hours: 6     # look back 6h for whale underdog activity
     min_whale_trade_usd: 200    # min whale trade size to count as confirmation
     min_whale_confirmations: 1  # at least 1 whale must be on underdog side
     # Execution
-    max_position_usd: 20        # NO at 20-37¢ = 2-4x upside, keep size reasonable
-
-  whale_follow:
-    enabled: true
-    description: "Follow smart money via order flow signals (volume surge, tight spread, imbalance)"
-    min_volume_24h: 2000        # min 24h volume to consider
-    min_volume_surge_ratio: 3.0 # 24h vol must be 3x open interest
-    min_order_imbalance: 0.70   # 70%+ order book skew to one side
-    max_spread_cents: 5         # only tight-spread markets (confident pricing)
-    min_yes_price: 20           # avoid very cheap longshots
-    max_yes_price: 55           # hard cap — endgame_arb handles anything above this
-    max_entry_cents: 55         # checked on actual entry side (YES or NO)
-    max_close_days: 7           # only markets closing within 1 week
-    min_signal_score: 3         # min combined signal score (max 8) to trigger
-    max_position_usd: 10
+    max_position_usd: 200       # $200 per game
+    max_strategy_exposure_usd: 1000  # hard cap — max 5 games open at once
 
 # ============================================================
 # Risk Management
 # ============================================================
 risk:
-  max_open_positions: 20
-  max_total_exposure_usd: 500    # $500 total; endgame_arb capped at $250 via strategy config
-  stop_loss_pct: 30
-  max_daily_loss_usd: 50         # hard stop if we lose $50 in a day
+  max_open_positions: 5          # 5 games × $200 = $1,000 max
+  max_total_exposure_usd: 1000
+  stop_loss_pct: 100             # let each position resolve naturally (binary outcome)
+  max_daily_loss_usd: 400        # hard stop at $400/day loss
