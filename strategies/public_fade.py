@@ -1,30 +1,24 @@
 """
 Public Fade Strategy
 ====================
-Primary signal: The Action Network public betting percentage data
-Smart money confirmation: Polymarket whale activity on the fade side
+Signal: The Action Network public betting percentage data
 
 Logic:
   1. Fetch live games from Action Network for NBA, MLB, NFL, NHL
-  2. Find games where 65%+ of PUBLIC BETS are on one team (the "public side")
-  3. Check Polymarket whale_trades_cache: did smart money recently buy the OTHER team?
-  4. If confirmed → fade the public on Kalshi (buy the underdog side)
-  5. Entry: only if Kalshi market exists and underdog price is 28–72¢
+  2. Find games where PUBLIC BETS ≥ min_public_pct on one team
+  3. Check that MONEY % is NOT equally high (sharp money not confirming public)
+     — bets/money divergence is the signal: public piling in, sharp sitting out
+  4. Fade the public on Kalshi (buy the underdog side)
+  5. Entry: Kalshi market exists, underdog price is 28–72¢
 
-This uses REAL betting percentage data, not price as a proxy for public action.
-A team being a Kalshi favorite doesn't mean public is on them — this does.
+No Polymarket dependency. Action Network public % data is the sole signal.
 """
 import time
-import os
 from datetime import datetime, timezone, timedelta
 import requests
 
 from strategies.base import BaseStrategy
-from strategies.polymarket_tail import (
-    SUPABASE_URL, ANON_KEY, HEADERS,
-    get_trader_stats,
-    extract_team_tokens, TEAM_ALIASES,
-)
+from strategies.polymarket_tail import extract_team_tokens, TEAM_ALIASES
 from core import api, notifier, state as state_mgr
 from core.health import cached
 
@@ -39,9 +33,6 @@ SPORTS = ["nba", "mlb", "nfl", "nhl"]  # leagues to scan
 
 _an_session = requests.Session()
 _an_session.headers.update(AN_HEADERS)
-
-_pm_session = requests.Session()
-_pm_session.headers.update({"apikey": ANON_KEY, "Authorization": f"Bearer {ANON_KEY}"})
 
 
 # ── Action Network helpers ────────────────────────────────────────────────────
@@ -106,70 +97,6 @@ def get_public_lean(game: dict) -> dict | None:
         "status":       game.get("status", ""),
         "game_id":      game.get("id"),
     }
-
-
-# ── Polymarket whale confirmation ─────────────────────────────────────────────
-
-def get_whale_trades_for_underdog(underdog_name: str, lookback_hours: int,
-                                  min_usd: float) -> list:
-    """
-    Search PolymarketScan for recent whale trades on the underdog side.
-    Underdog = price < 0.55 AND the team name appears in the market title.
-    """
-    def fetch():
-        try:
-            r = _pm_session.get(
-                f"{SUPABASE_URL}/whale_trades_cache",
-                params={
-                    "select": "tx_hash,wallet,market_title,market_slug,side,"
-                              "outcome,amount_usd,price,timestamp,tier,anomaly_tags",
-                    "amount_usd": f"gte.{min_usd}",
-                    "order": "timestamp.desc",
-                    "limit": 100,
-                }, timeout=10,
-            )
-            r.raise_for_status()
-            return r.json() if isinstance(r.json(), list) else []
-        except Exception:
-            return []
-
-    all_trades = cached("whale_trades_fade_v2", ttl=120, fetch_fn=fetch) or []
-
-    now_ts = time.time()
-    cutoff = now_ts - (lookback_hours * 3600)
-
-    # Build search tokens from underdog name + aliases
-    search_tokens = [underdog_name.lower()]
-    for team_key, aliases in TEAM_ALIASES.items():
-        if team_key in underdog_name.lower() or underdog_name.lower() in team_key:
-            search_tokens.extend(aliases)
-
-    matching = []
-    for t in all_trades:
-        # Time filter
-        ts_str = t.get("timestamp", "")
-        try:
-            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
-            if ts < cutoff:
-                continue
-        except Exception:
-            continue
-
-        # Only BUY trades
-        if t.get("side", "").upper() != "BUY":
-            continue
-
-        # Smart money price filter: underdog = price < 0.55
-        price = t.get("price", 1.0)
-        if price >= 0.55:
-            continue
-
-        # Team name must appear in market title
-        pm_title = (t.get("market_title") or "").lower()
-        if any(tok in pm_title for tok in search_tokens):
-            matching.append(t)
-
-    return matching
 
 
 # ── Kalshi matching helpers ───────────────────────────────────────────────────
@@ -237,16 +164,13 @@ class PublicFadeStrategy(BaseStrategy):
     name = "public_fade"
 
     def scan(self, markets: list, state: dict, cfg: dict, paper_trading: bool):
-        min_pub_pct      = cfg.get("min_public_pct", 65)      # % of bets on public side to trigger
-        min_money_pct    = cfg.get("min_money_pct", 55)        # % of money (looser — sharp money can offset)
-        max_pos          = cfg.get("max_position_usd", 250)
-        max_hours        = cfg.get("max_hours_to_close", 48)
-        lookback_hours   = cfg.get("whale_lookback_hours", 6)
-        min_whale_usd    = cfg.get("min_whale_trade_usd", 200)
-        min_whale_trades = cfg.get("min_whale_confirmations", 1)
-        max_entry        = cfg.get("max_entry_cents", 72)      # don't buy underdog above this
-        min_entry        = cfg.get("min_entry_cents", 28)      # don't buy extreme longshots
-        risk             = state.get("_risk_config", {})
+        min_pub_pct   = cfg.get("min_public_pct", 65)   # % of bets on public side to trigger
+        max_money_pct = cfg.get("max_money_pct", 75)    # skip if money % also this high (sharp confirming public)
+        max_pos       = cfg.get("max_position_usd", 250)
+        max_hours     = cfg.get("max_hours_to_close", 48)
+        max_entry     = cfg.get("max_entry_cents", 72)   # don't buy underdog above this
+        min_entry     = cfg.get("min_entry_cents", 28)   # don't buy extreme longshots
+        risk          = state.get("_risk_config", {})
 
         now = datetime.now(timezone.utc)
         game_cutoff = now + timedelta(hours=max_hours)
@@ -293,12 +217,12 @@ class PublicFadeStrategy(BaseStrategy):
                 else:
                     continue  # no strong public lean
 
-                # Money check: if sharp money is ALSO with public, skip
-                # (we want public money pct to be high but not reinforced by sharp money)
-                if money_pct is not None and money_pct >= 75:
+                # Skip if sharp money is ALSO with the public — no edge
+                # (divergence between bets% and money% is the signal)
+                if money_pct is not None and money_pct >= max_money_pct:
                     self.log.debug(
-                        f"Skipping {fade_team.get('full_name')} fade — money also with public "
-                        f"({money_pct}%)"
+                        f"Skipping {fade_team.get('full_name')} fade — "
+                        f"sharp money also with public ({money_pct}% ≥ {max_money_pct}%)"
                     )
                     continue
 
@@ -315,65 +239,23 @@ class PublicFadeStrategy(BaseStrategy):
             self.log.info("No public-heavy games found across NBA/MLB/NFL/NHL this tick.")
             return
 
-        self.log.info(
-            f"Found {len(fade_opps)} public-heavy game(s) to check for whale confirmation."
+        self.log.info(f"Found {len(fade_opps)} fade opportunity(s):")
+        for opp in fade_opps:
+            self.log.info(
+                f"  [{opp['sport']}] {opp['pub_pct']}% bets on "
+                f"{opp['public_team'].get('full_name')} | "
+                f"money {opp['money_pct']}% → fade "
+                f"{opp['fade_team'].get('full_name')}"
+            )
+
+        # Sort: highest public skew + biggest bets/money divergence first
+        fade_opps.sort(
+            key=lambda x: (x["pub_pct"] - (x["money_pct"] or 50)),
+            reverse=True,
         )
-        for opp in fade_opps:
-            self.log.info(
-                f"  [{opp['sport']}] Public {opp['pub_pct']}% on "
-                f"{opp['public_team'].get('full_name')} → fade "
-                f"{opp['fade_team'].get('full_name')} "
-                f"(money: {opp['money_pct']}% with public)"
-            )
 
-        # ── Step 2: Whale confirmation on fade side ───────────────────────────
-        confirmed = []
-        for opp in fade_opps:
-            fade_name = opp["fade_team"].get("full_name", "")
-
-            whale_confirms = get_whale_trades_for_underdog(
-                fade_name,
-                lookback_hours=lookback_hours,
-                min_usd=min_whale_usd,
-            )
-
-            if len(whale_confirms) < min_whale_trades:
-                self.log.info(
-                    f"  ❌ No whale on {fade_name} "
-                    f"({len(whale_confirms)}/{min_whale_trades} required)"
-                )
-                continue
-
-            total_whale_usd = sum(t.get("amount_usd", 0) for t in whale_confirms)
-            top_whale = whale_confirms[0]
-            stats = get_trader_stats(top_whale.get("wallet", ""))
-            trader_name = stats.get("display_name") or top_whale.get("wallet", "")[:10] + "..."
-            trader_pnl  = stats.get("total_pnl", 0)
-            trader_wr   = stats.get("win_rate", 0)
-
-            opp["whale_confirms"]  = len(whale_confirms)
-            opp["whale_usd"]       = total_whale_usd
-            opp["trader_name"]     = trader_name
-            opp["trader_pnl"]      = trader_pnl
-            opp["trader_wr"]       = trader_wr
-            opp["pm_price"]        = top_whale.get("price", 0)
-            confirmed.append(opp)
-
-            self.log.info(
-                f"  ✅ Whale confirmed: {fade_name} | "
-                f"{len(whale_confirms)} whale(s) | ${total_whale_usd:,.0f} | "
-                f"{trader_name} WR={trader_wr:.0f}%"
-            )
-
-        if not confirmed:
-            self.log.info("No confirmed fade opportunities this tick.")
-            return
-
-        # Sort: most public skew first
-        confirmed.sort(key=lambda x: x["pub_pct"], reverse=True)
-
-        # ── Step 3: Match to Kalshi + execute ────────────────────────────────
-        for opp in confirmed[:3]:
+        # ── Step 2: Match to Kalshi + execute ────────────────────────────────
+        for opp in fade_opps[:5]:
             if not self.can_open(state, risk, max_pos, cfg):
                 break
 
@@ -413,15 +295,13 @@ class PublicFadeStrategy(BaseStrategy):
             url = self.market_url(ticker)
             expected_ret = round((100 - entry_cents) / entry_cents * 100, 1)
 
+            bets_vs_money = (opp["pub_pct"] or 0) - (opp["money_pct"] or 50)
             detail = (
-                f"📊 Public: {opp['pub_pct']}% bets on {public_name} | "
-                f"money: {opp['money_pct']}%\n"
-                f"📉 Fading with {side} on {fade_name} @ {entry_cents}¢\n"
-                f"Expected return: +{expected_ret:.1f}%\n"
-                f"🐋 {opp['whale_confirms']} whale(s) on fade side — "
-                f"${opp['whale_usd']:,.0f} on Polymarket\n"
-                f"Top: {opp['trader_name']} | "
-                f"PnL ${opp['trader_pnl']:,.0f} | WR {opp['trader_wr']:.0f}%"
+                f"📊 Public: {opp['pub_pct']}% of bets on {public_name}\n"
+                f"💰 Money: {opp['money_pct']}% on {public_name} "
+                f"(+{bets_vs_money:.0f}pt bets/money gap — sharp divergence)\n"
+                f"📉 Fade: {side} on {fade_name} @ {entry_cents}¢\n"
+                f"Expected return: +{expected_ret:.1f}% | Size: ${max_pos}"
             )
 
             self.log.info(
