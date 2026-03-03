@@ -89,6 +89,21 @@ strategies:
     long_horizon_days: 7            # (redundant with max_close_days but kept for compat)
     long_horizon_max_cents: 15      # if >3d out, only enter at ≤15¢
 
+  public_fade:
+    enabled: true
+    description: "Fade the public on sports favorites, confirmed by Polymarket whale activity"
+    # Kalshi YES price range indicating public overbetting (cents)
+    min_yes_price: 63       # below this = not enough public lean to fade
+    max_yes_price: 80       # above this = genuine lock, not public bias
+    max_hours_to_close: 48  # game must start/end within 48h
+    min_volume_24h: 1000    # need real liquidity
+    # Whale confirmation (Polymarket)
+    whale_lookback_hours: 6     # look back 6h for whale underdog activity
+    min_whale_trade_usd: 200    # min whale trade size to count as confirmation
+    min_whale_confirmations: 1  # at least 1 whale must be on underdog side
+    # Execution
+    max_position_usd: 20        # NO at 20-37¢ = 2-4x upside, keep size reasonable
+
   whale_follow:
     enabled: true
     description: "Follow smart money via order flow signals (volume surge, tight spread, imbalance)"

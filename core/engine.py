@@ -13,6 +13,7 @@ STRATEGY_MODULES = {
     "whale_follow":    "strategies.whale_follow:WhaleFollowStrategy",
     "polymarket_tail": "strategies.polymarket_tail:PolymarketTailStrategy",
     "agent_signal":    "strategies.agent_signal:AgentSignalStrategy",
+    "public_fade":     "strategies.public_fade:PublicFadeStrategy",
     # Add new strategies here
 }
 
@@ -40,7 +41,7 @@ def load_strategies(config):
 
 
 ARB_STRATEGIES = {"endgame_arb", "intramarket_arb"}
-SIGNAL_STRATEGIES = {"whale_follow", "polymarket_tail", "agent_signal", "momentum"}
+SIGNAL_STRATEGIES = {"whale_follow", "polymarket_tail", "agent_signal", "momentum", "public_fade"}
 
 
 def run_once(strategies, config, arb_only=False):
