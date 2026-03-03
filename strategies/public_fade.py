@@ -166,7 +166,7 @@ class PublicFadeStrategy(BaseStrategy):
             })
 
         if not candidates:
-            self.log.debug("No public-overbetting candidates found.")
+            self.log.info("No public-overbetting candidates found this tick.")
             return
 
         self.log.info(f"{len(candidates)} public-favorite candidates to check for whale fade confirmation.")
@@ -186,7 +186,7 @@ class PublicFadeStrategy(BaseStrategy):
             game_keywords = list(set(game_keywords + raw_words))
 
             if not game_keywords:
-                self.log.debug(f"No game keywords extracted for: {title[:60]}")
+                self.log.info(f"No game keywords extracted for: {title[:60]}")
                 continue
 
             whale_confirms = get_recent_whale_trades_for_game(
@@ -196,9 +196,9 @@ class PublicFadeStrategy(BaseStrategy):
             )
 
             if len(whale_confirms) < min_whale_trades:
-                self.log.debug(
-                    f"No whale fade confirmation for: {title[:60]} "
-                    f"(found {len(whale_confirms)}/{min_whale_trades} required)"
+                self.log.info(
+                    f"👀 Candidate (no whale yet): {title[:60]} "
+                    f"YES@{cand['yes_ask']}¢ | closes in {cand['hours_left']}h"
                 )
                 continue
 
@@ -225,7 +225,7 @@ class PublicFadeStrategy(BaseStrategy):
             )
 
         if not confirmed:
-            self.log.debug("No fade opportunities with whale confirmation this tick.")
+            self.log.info("No confirmed fade opportunities this tick (candidates found but no whale signal).")
             return
 
         # Sort: most whale conviction first
