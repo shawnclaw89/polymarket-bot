@@ -2,17 +2,11 @@
 Public Fade Strategy — requires user approval before any trade fires
 ====================================================================
 Flow:
-  1. Fetch Kalshi game-winner markets
-  2. For each, look up Action Network betting % by team name
-  3. Signal = public % >> money % on same team (divergence ≥ threshold)
-  4. Validate sport match — no NBA signals on MLB markets, etc.
-  5. Queue signal in pending_trades.json, send Telegram alert
-  6. On next tick, if user approved → execute. Otherwise skip.
-
-Fixes vs previous version:
-  - Game deduplication (one trade per game, never both sides)
-  - Sport inference validation
-  - No auto-fire in live mode — all trades require approval
+  1. Fetch Kalshi game-winner markets (both "X vs Y" and "X at Y" formats)
+  2. Group by close date, fetch Action Network data per date
+  3. Signal = public % >> money % divergence on same team
+  4. Validate sport via ticker prefix (KXNBAGAME/KXNHLGAME/KXMLBSTGAME)
+  5. Queue signal → Telegram alert → wait for user approval → execute
 """
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -23,8 +17,112 @@ from strategies.polymarket_tail import TEAM_ALIASES
 from core import api, notifier, state as state_mgr, pending as pending_mgr
 from core.health import cached
 
-AN_BASE          = "https://api.actionnetwork.com/web/v1/scoreboard"
-AN_HEADERS       = {
+# ── Ticker-prefix sport detection (most reliable) ────────────────────────────
+TICKER_SPORT_MAP = {
+    "KXNBAGAME":    "NBA",
+    "KXNBA1HWINNER":"NBA",
+    "KXNBA2HWINNER":"NBA",
+    "KXNHLGAME":    "NHL",
+    "KXMLBSTGAME":  "MLB",
+    "KXMLBWBCGAME": "MLB",
+}
+
+def sport_from_ticker(ticker: str) -> str | None:
+    for prefix, sport in TICKER_SPORT_MAP.items():
+        if ticker.startswith(prefix):
+            return sport
+    return None
+
+# ── Team abbreviation → full name (from Kalshi ticker suffix) ────────────────
+NBA_ABBREV = {
+    "ATL":"atlanta hawks","BOS":"boston celtics","BKN":"brooklyn nets",
+    "CHA":"charlotte hornets","CHI":"chicago bulls","CLE":"cleveland cavaliers",
+    "DAL":"dallas mavericks","DEN":"denver nuggets","DET":"detroit pistons",
+    "GSW":"golden state warriors","HOU":"houston rockets","IND":"indiana pacers",
+    "LAC":"los angeles clippers","LAL":"los angeles lakers","MEM":"memphis grizzlies",
+    "MIA":"miami heat","MIL":"milwaukee bucks","MIN":"minnesota timberwolves",
+    "NOP":"new orleans pelicans","NYK":"new york knicks","OKC":"oklahoma city thunder",
+    "ORL":"orlando magic","PHI":"philadelphia 76ers","PHX":"phoenix suns",
+    "POR":"portland trail blazers","SAC":"sacramento kings","SAS":"san antonio spurs",
+    "TOR":"toronto raptors","UTA":"utah jazz","WAS":"washington wizards",
+}
+NHL_ABBREV = {
+    "ANA":"anaheim ducks","BOS":"boston bruins","BUF":"buffalo sabres",
+    "CAR":"carolina hurricanes","CBJ":"columbus blue jackets","CGY":"calgary flames",
+    "CHI":"chicago blackhawks","COL":"colorado avalanche","DAL":"dallas stars",
+    "DET":"detroit red wings","EDM":"edmonton oilers","FLA":"florida panthers",
+    "LA":"los angeles kings","MIN":"minnesota wild","MTL":"montreal canadiens",
+    "NSH":"nashville predators","NJ":"new jersey devils","NYI":"new york islanders",
+    "NYR":"new york rangers","OTT":"ottawa senators","PHI":"philadelphia flyers",
+    "PIT":"pittsburgh penguins","SEA":"seattle kraken","SJ":"san jose sharks",
+    "STL":"st. louis blues","TB":"tampa bay lightning","TOR":"toronto maple leafs",
+    "UTA":"utah mammoth","VAN":"vancouver canucks","VGK":"vegas golden knights",
+    "WSH":"washington capitals","WPG":"winnipeg jets",
+}
+ALL_ABBREV = {**NBA_ABBREV, **NHL_ABBREV}
+
+# Extra Kalshi-specific title fragments → full team name (for "at" format)
+KALSHI_TEAM_NAMES = {
+    "los angeles l":   "los angeles lakers",
+    "los angeles c":   "los angeles clippers",
+    "new york i":      "new york islanders",
+    "new york r":      "new york rangers",
+    "new york k":      "new york knicks",
+    "golden state":    "golden state warriors",
+    "oklahoma city":   "oklahoma city thunder",
+    "san antonio":     "san antonio spurs",
+    "new orleans":     "new orleans pelicans",
+    "utah":            "utah jazz",           # NBA
+    "indiana":         "indiana pacers",
+    "portland":        "portland trail blazers",
+    "sacramento":      "sacramento kings",
+    "memphis":         "memphis grizzlies",
+    "minnesota":       "minnesota timberwolves",
+    "toronto":         "toronto raptors",
+    "denver":          "denver nuggets",
+    "dallas":          "dallas mavericks",
+    "miami":           "miami heat",
+    "charlotte":       "charlotte hornets",
+    "chicago":         "chicago bulls",
+    "brooklyn":        "brooklyn nets",
+    "phoenix":         "phoenix suns",
+    "detroit":         "detroit pistons",
+    "cleveland":       "cleveland cavaliers",
+    "milwaukee":       "milwaukee bucks",
+    "atlanta":         "atlanta hawks",
+    "boston":          "boston celtics",
+    # NHL
+    "winnipeg":        "winnipeg jets",
+    "edmonton":        "edmonton oilers",
+    "ottawa":          "ottawa senators",
+    "calgary":         "calgary flames",
+    "vancouver":       "vancouver canucks",
+    "montreal":        "montreal canadiens",
+    "nashville":       "nashville predators",
+    "columbus":        "columbus blue jackets",
+    "pittsburgh":      "pittsburgh penguins",
+    "buffalo":         "buffalo sabres",
+    "anaheim":         "anaheim ducks",
+    "seattle":         "seattle kraken",
+    "colorado":        "colorado avalanche",
+    "carolina":        "carolina hurricanes",
+    "florida":         "florida panthers",
+    "tampa bay":       "tampa bay lightning",
+    "vegas":           "vegas golden knights",
+    "st. louis":       "st. louis blues",
+    "washington":      "washington capitals",
+    "new jersey":      "new jersey devils",
+    "philadelphia":    "philadelphia flyers",  # NHL
+}
+
+def resolve_yes_team(ticker: str) -> str | None:
+    suffix = ticker.split("-")[-1].upper()
+    return ALL_ABBREV.get(suffix)
+
+
+# ── Action Network ────────────────────────────────────────────────────────────
+AN_BASE = "https://api.actionnetwork.com/web/v1/scoreboard"
+AN_HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
     "Accept":     "application/json",
 }
@@ -34,89 +132,31 @@ SPORTS = ["nba", "mlb", "nfl", "nhl", "ncaab"]
 _session = requests.Session()
 _session.headers.update(AN_HEADERS)
 
-# ── Sport inference from Kalshi title ─────────────────────────────────────────
-# Fragments that reliably identify which sport a Kalshi market belongs to.
-# Order matters — check MLB before NHL (both have "boston", "buffalo" etc.)
-_SPORT_FRAGS = [
-    ("MLB", {
-        "new york y", "new york m", "los angeles d", "los angeles a",
-        "chicago c", "chicago w", "chicago ws",
-        "yankee", "dodger", "padre", "mariner", "mets",
-        "athletics", "a's", "brewer", "twin", "brave", "cardinal",
-        "pirate", "guardian", "tiger", "oriole", "ray", "royal",
-        "astro", "ranger", "angel", "phillie", "diamondback",
-        "rocki", "cub", "giant", "red sox",
-        "cleveland", "tampa bay", "houston", "seattle", "san diego",
-        "san francisco", "kansas city", "st. louis", "milwauke",
-        "baltimor", "cincinnati", "colorado",
-    }),
-    ("NHL", {
-        "bruin", "sabre", "blackhawk", "jet", "mammoth",
-        "capital", "penguin", "senator", "oiler", "flame", "canuck",
-        "kraken", "shark", "duck", "avalanche", "wild", "predator",
-        "lightning", "panther", "devil", "golden knight", "canadien",
-        "habs", "blue jacket", "islander",
-        # City names for teams whose Kalshi title uses city only
-        "ottawa", "edmonton", "winnipeg", "calgary", "vancouver",
-        "buffalo", "nashville", "columbus", "pittsburgh", "new jersey",
-        "montreal", "winnipeg", "utah mammoth", "vegas",
-    }),
-    ("NBA", {
-        "timberwolve", "wolf", "knick", "laker", "celtics", "warrior",
-        "heat", "buck", "sixer", "76er", "net", "bull", "cavalier",
-        "raptor", "pacer", "hawk", "hornet", "magic", "piston",
-        "wizard", "nugget", "thunder", "jazz", "blazer", "sun",
-        "spur", "maverick", "rocket", "grizzl", "pelican", "clipper",
-        "oklahoma city", "san antonio", "new orleans", "golden state",
-        "portland", "sacramento", "memphis", "denver", "indiana",
-        "charlotte", "orlando", "detroit", "washington wizard",
-    }),
-    ("NFL", {
-        "patriot", "dolphin", "ravens", "steeler", "chief", "raider",
-        "charger", "bronco", "cowboy", "eagle", "commander", "viking",
-        "packer", "seahawk", "49er", "falcon", "saint", "buccaneer",
-        "panther", "jaguar", "titan", "colt", "texan",
-    }),
-]
 
-def infer_sport(title: str) -> str | None:
-    # Strip "winner?" suffix before checking so "chicago winner?" doesn't match "chicago w"
-    t = title.lower().replace("winner?", "").replace("winner", "").strip()
-    for sport, frags in _SPORT_FRAGS:
-        if any(f in t for f in frags):
-            return sport
-    return None
-
-
-def game_base_id(ticker: str) -> str:
-    """Strip the team suffix from a Kalshi ticker to get the game ID.
-    KXMLBSTGAME-26MAR051305MINNYY-NYY  →  KXMLBSTGAME-26MAR051305MINNYY
-    """
-    parts = ticker.rsplit("-", 1)
-    return parts[0] if len(parts) == 2 else ticker
-
-
-# ── Action Network ────────────────────────────────────────────────────────────
-
-def get_all_an_leans() -> list:
+def get_an_leans_for_date(date_str: str, sport: str) -> list:
+    """Fetch AN games for a specific date (YYYYMMDD) and sport."""
+    cache_key = f"an_{sport}_{date_str}"
     def fetch():
-        leans = []
-        for sport in SPORTS:
-            try:
-                r = _session.get(f"{AN_BASE}/{sport}", timeout=10)
-                r.raise_for_status()
-                for game in r.json().get("games", []):
-                    lean = _extract_lean(game, sport)
-                    if lean:
-                        leans.append(lean)
-            except Exception:
-                pass
-        return leans
-    return cached("all_an_leans", ttl=180, fetch_fn=fetch) or []
+        try:
+            r = _session.get(
+                f"{AN_BASE}/{sport}",
+                params={"date": date_str},
+                timeout=10,
+            )
+            r.raise_for_status()
+            leans = []
+            for game in r.json().get("games", []):
+                lean = _extract_lean(game, sport)
+                if lean:
+                    leans.append(lean)
+            return leans
+        except Exception:
+            return []
+    return cached(cache_key, ttl=300, fetch_fn=fetch) or []
 
 
 def _extract_lean(game: dict, sport: str) -> dict | None:
-    teams  = {t["id"]: t for t in game.get("teams", [])}
+    teams   = {t["id"]: t for t in game.get("teams", [])}
     home_id = game.get("home_team_id")
     away_id = game.get("away_team_id")
     if not home_id or not away_id:
@@ -147,6 +187,10 @@ def _team_score(kalshi_frag: str, an_full_name: str) -> int:
     frag = kalshi_frag.lower().strip().rstrip("?")
     full = an_full_name.lower()
     score = 0
+    # Check Kalshi-specific name first
+    mapped = KALSHI_TEAM_NAMES.get(frag)
+    if mapped and mapped in full:
+        score += 5
     if frag in full or full in frag:
         score += 4
     for word in frag.split():
@@ -178,12 +222,59 @@ def build_team_signals(leans: list) -> dict:
 
 
 def find_team_signal(frag: str, signals: dict) -> tuple:
+    frag = frag.lower().strip()
+    # Check Kalshi-specific name mapping first
+    mapped = KALSHI_TEAM_NAMES.get(frag)
+    if mapped and mapped in signals:
+        return mapped, signals[mapped]
     best_name, best_sig, best_score = None, None, 0
     for name, sig in signals.items():
         score = _team_score(frag, name)
         if score > best_score:
             best_score, best_name, best_sig = score, name, sig
     return (best_name, best_sig) if best_score >= 3 else (None, None)
+
+
+def parse_teams(title: str, ticker: str) -> tuple[str, str]:
+    """
+    Parse Kalshi title to get (frag_yes, frag_no).
+    Returns frags for the YES-side team and NO-side team.
+    """
+    tl = title.lower()
+    if " vs " in tl:
+        parts  = tl.split(" vs ", 1)
+        frag_a = parts[0].strip()
+        frag_b = parts[1].replace("winner?","").replace("winner","").strip()
+    elif " at " in tl:
+        parts     = tl.split(" at ", 1)
+        frag_away = parts[0].strip()
+        frag_home = parts[1].replace("winner?","").replace("winner","").strip()
+        frag_a, frag_b = frag_away, frag_home
+    else:
+        return "", ""
+
+    # Resolve YES team from ticker suffix
+    yes_team = resolve_yes_team(ticker)
+    if yes_team:
+        sa = _team_score(frag_a, yes_team)
+        sb = _team_score(frag_b, yes_team)
+        if sa >= sb:
+            return frag_a, frag_b   # frag_a = YES
+        else:
+            return frag_b, frag_a   # frag_b = YES
+    # Fallback: first team = YES
+    return frag_a, frag_b
+
+
+def kalshi_close_date_str(close_time: str) -> str:
+    """Return YYYYMMDD in US Eastern time for the market close time."""
+    try:
+        dt_utc = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+        # Convert to US Eastern (UTC-5 / UTC-4 DST — use UTC-5 as conservative)
+        dt_et = dt_utc - timedelta(hours=5)
+        return dt_et.strftime("%Y%m%d")
+    except Exception:
+        return datetime.now(timezone.utc).strftime("%Y%m%d")
 
 
 # ── Strategy ──────────────────────────────────────────────────────────────────
@@ -203,26 +294,20 @@ class PublicFadeStrategy(BaseStrategy):
         now    = datetime.now(timezone.utc)
         cutoff = now + timedelta(hours=max_hours)
 
-        # ── Step 0: Execute any user-approved trades from previous ticks ──────
+        # ── Step 0: Execute approved trades ──────────────────────────────────
         self._execute_approved(state, risk, max_pos, cfg, paper_trading, telegram_to)
 
-        # ── Step 1: Build AN team signal map ─────────────────────────────────
-        all_leans = get_all_an_leans()
-        if not all_leans:
-            self.log.warning("Could not fetch Action Network data.")
-            return
-        team_signals = build_team_signals(all_leans)
-
-        # ── Step 2: Kalshi game-winner markets ────────────────────────────────
-        seen_games = set()   # dedup by game base ticker
+        # ── Step 1: Filter Kalshi game markets ────────────────────────────────
+        seen_games = set()
         game_markets = []
         for m in markets:
             if m.get("_category", "").lower() != "sports":
                 continue
             title = m.get("title", "")
-            if " vs " not in title.lower():
+            tl    = title.lower()
+            if " vs " not in tl and " at " not in tl:
                 continue
-            if "winner" not in title.lower():
+            if "winner" not in tl:
                 continue
             ct = m.get("close_time") or m.get("expiration_time", "")
             if not ct:
@@ -234,58 +319,71 @@ class PublicFadeStrategy(BaseStrategy):
             except Exception:
                 continue
             ticker  = m.get("ticker", "")
-            game_id = game_base_id(ticker)
+            game_id = ticker.rsplit("-", 1)[0]
             if game_id in seen_games:
-                continue   # already have a market for this game
+                continue
             if self.is_already_open(state, ticker):
                 continue
             if pending_mgr.is_game_already_queued(game_id):
                 continue
             seen_games.add(game_id)
+            m["_close_time"] = ct
             game_markets.append(m)
 
         if not game_markets:
             self.log.info("No new Kalshi game markets to check.")
             return
 
-        self.log.info(
-            f"Checking {len(game_markets)} unique Kalshi games vs "
-            f"{len(all_leans)} AN games."
-        )
+        self.log.info(f"Checking {len(game_markets)} unique Kalshi game markets.")
 
-        # ── Step 3: Match & check signal ─────────────────────────────────────
+        # ── Step 2: Group by (sport, date) and fetch AN data once per group ──
+        an_signal_cache: dict[str, dict] = {}  # cache key → team signals dict
+
+        def get_signals(sport_key: str, date_str: str) -> dict:
+            key = f"{sport_key}_{date_str}"
+            if key not in an_signal_cache:
+                leans = get_an_leans_for_date(date_str, sport_key.lower())
+                an_signal_cache[key] = build_team_signals(leans)
+            return an_signal_cache[key]
+
+        # ── Step 3: Check each market ─────────────────────────────────────────
         for km in game_markets:
             ticker  = km.get("ticker", "")
             title   = km.get("title", "")
             yes_ask = km.get("yes_ask", 0)
             no_ask  = km.get("no_ask", 0)
+            ct      = km.get("_close_time", "")
 
-            parts    = title.lower().split(" vs ", 1)
-            frag_yes = parts[0].strip()
-            frag_no  = parts[1].replace("winner?","").replace("winner","").strip()
+            sport = sport_from_ticker(ticker)
+            if not sport:
+                continue  # only trade markets we can identify
 
-            yes_name, yes_sig = find_team_signal(frag_yes, team_signals)
-            no_name,  no_sig  = find_team_signal(frag_no,  team_signals)
+            date_str = kalshi_close_date_str(ct)
+            signals  = get_signals(sport, date_str)
+            if not signals:
+                continue
+
+            frag_yes, frag_no = parse_teams(title, ticker)
+            if not frag_yes:
+                continue
+
+            yes_name, yes_sig = find_team_signal(frag_yes, signals)
+            no_name,  no_sig  = find_team_signal(frag_no,  signals)
 
             if not yes_sig and not no_sig:
                 continue
 
-            # Validate sport — must agree between Kalshi title and AN data
-            inferred_sport = infer_sport(title)
-
-            signal_found = False
+            # Validate sport matches AN signal
             for fade_side, pub_name, sig, entry_cents in [
-                ("NO",  yes_name, yes_sig, no_ask),   # public on YES → fade = NO
-                ("YES", no_name,  no_sig,  yes_ask),  # public on NO  → fade = YES
+                ("NO",  yes_name, yes_sig, no_ask),
+                ("YES", no_name,  no_sig,  yes_ask),
             ]:
                 if not sig or not entry_cents:
                     continue
-
-                # Sport consistency check
-                if inferred_sport and sig["sport"] != inferred_sport:
+                if sig["sport"] != sport:
                     self.log.debug(
-                        f"Sport mismatch: title={inferred_sport} signal={sig['sport']} "
-                        f"— skipping {title[:50]}"
+                        f"Sport mismatch: Kalshi={sport} AN={sig['sport']} — "
+                        f"skip {title[:50]}"
                     )
                     continue
 
@@ -303,9 +401,8 @@ class PublicFadeStrategy(BaseStrategy):
                 fade_name    = (no_name if fade_side == "NO" else yes_name) or "opponent"
                 expected_ret = round((100 - entry_cents) / entry_cents * 100, 1)
                 trade_id     = uuid.uuid4().hex[:6].upper()
-
                 signal_summary = (
-                    f"[{sig['sport']}] Public {pub_pct}% bets / {money_pct}% money "
+                    f"[{sport}] Public {pub_pct}% bets / {money_pct}% money "
                     f"on {pub_name} (+{divergence:.0f}pt)"
                 )
 
@@ -316,9 +413,8 @@ class PublicFadeStrategy(BaseStrategy):
                     "size_usd":    max_pos,
                     "title":       title,
                     "signal":      signal_summary,
-                    "sport":       sig["sport"],
+                    "sport":       sport,
                 })
-
                 if queued:
                     self.log.info(
                         f"⏳ Signal queued [{trade_id}]: {title[:55]} | "
@@ -335,44 +431,32 @@ class PublicFadeStrategy(BaseStrategy):
                         f"(Expires in 30 min)",
                         to=telegram_to,
                     )
-                    signal_found = True
-                break  # only one side per game
-
-            if not signal_found:
-                pass  # no qualifying signal for this game
+                break  # one side per game
 
     def _execute_approved(self, state, risk, max_pos, cfg, paper_trading, telegram_to):
-        """Check pending_trades.json for approved trades and execute them."""
         approved = pending_mgr.get_approved()
         if not approved:
             return
-
         for t in approved:
             ticker      = t["ticker"]
             side        = t["side"]
             entry_cents = t["entry_cents"]
             trade_id    = t["id"]
-
             if self.is_already_open(state, ticker):
                 pending_mgr.mark_executed(trade_id)
                 continue
             if not self.can_open(state, risk, max_pos, cfg):
                 self.log.warning("Approved trade skipped — exposure limit reached.")
                 break
-
             contracts = api.usd_to_contracts(max_pos, entry_cents)
             self.log.info(
                 f"[{'PAPER' if paper_trading else 'LIVE'}] Executing approved trade "
                 f"{trade_id}: {ticker} {side}@{entry_cents}¢"
             )
-
             if paper_trading:
                 state_mgr.open_position(state, ticker, self.name, side, entry_cents, max_pos)
                 pending_mgr.mark_executed(trade_id)
-                notifier.send(
-                    f"📝 PAPER trade executed [{trade_id}]\n{ticker} {side}@{entry_cents}¢",
-                    to=telegram_to,
-                )
+                notifier.send(f"📝 PAPER [{trade_id}] {ticker} {side}@{entry_cents}¢", to=telegram_to)
             else:
                 order = api.place_order(ticker, side.lower(), contracts, entry_cents)
                 if order is not None:
@@ -380,13 +464,11 @@ class PublicFadeStrategy(BaseStrategy):
                     pending_mgr.mark_executed(trade_id)
                     notifier.send(
                         f"✅ LIVE trade placed [{trade_id}]\n"
-                        f"{t['title']}\n"
-                        f"{side}@{entry_cents}¢ | ${max_pos} | {t['signal']}",
+                        f"{t['title']}\n{side}@{entry_cents}¢ | ${max_pos}\n{t['signal']}",
                         to=telegram_to,
                     )
                 else:
                     notifier.send(
-                        f"❌ Trade {trade_id} FAILED — order rejected by Kalshi\n"
-                        f"{ticker} {side}@{entry_cents}¢",
+                        f"❌ Trade {trade_id} FAILED — order rejected\n{ticker} {side}@{entry_cents}¢",
                         to=telegram_to,
                     )
