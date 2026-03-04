@@ -125,7 +125,8 @@ def run_once(strategies, config, arb_only=False):
         log.info(f"Fetched {len(markets)} markets.")
 
     state = state_mgr.load()
-    state["_risk_config"] = risk
+    state["_risk_config"]  = risk
+    state["_telegram_to"]  = config.get("telegram_to", "7591705971")
 
     # ── Begin alert batch ────────────────────────────────────────────────────
     notifier.begin_batch()
@@ -151,6 +152,7 @@ def run_once(strategies, config, arb_only=False):
     notifier.flush_batch(max_alerts=max_alerts, to=telegram_to)
 
     state.pop("_risk_config", None)
+    state.pop("_telegram_to", None)
     state_mgr.save(state)
 
     if not arb_only:
