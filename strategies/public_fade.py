@@ -17,6 +17,54 @@ from strategies.polymarket_tail import TEAM_ALIASES
 from core import api, notifier, state as state_mgr
 from core.health import cached
 
+# Fragments that reliably identify a sport from a Kalshi market title
+MLB_FRAGMENTS = {
+    "new york y", "new york m", "los angeles d", "los angeles a", "chicago c",
+    "chicago w", "chicago ws", "boston", "red sox", "yankee", "dodger", "padre",
+    "mariner", "athletics", "a's", "brewer", "twin", "brave", "cardinal",
+    "pirate", "guardian", "tiger", "oriole", "ray", "royal", "astro", "ranger",
+    "angel", "phillie", "diamondback", "rocki", "cub", "giant", "met",
+    "cleveland", "tampa bay", "houston", "seattle", "san diego", "san francisco",
+    "kansas city", "st. louis", "milwauke", "baltimor", "cincinnati", "colorado",
+}
+NBA_FRAGMENTS = {
+    "timberwolve", "wolf", "knick", "laker", "celtics", "warrior", "heat",
+    "buck", "sixer", "76er", "net", "bull", "cavalier", "raptor", "pacer",
+    "hawk", "hornet", "magic", "piston", "wizard", "nugget", "thunder",
+    "jazz", "blazer", "sun", "spur", "maverick", "rocket", "grizzl", "pelican",
+    "king", "clipper",
+}
+NFL_FRAGMENTS = {
+    "patriot", "bill", "dolphin", "ravens", "steeler", "brown", "chief",
+    "raider", "charger", "bronco", "cowboy", "eagle", "commander", "bear",
+    "viking", "lion", "packer", "seahawk", "49er", "ram", "cardinal",
+    "falcon", "saint", "buccaneer", "panther", "jaguar", "titan", "colt",
+    "texan",
+}
+NHL_FRAGMENTS = {
+    "bruin", "sabre", "black", "hawk", "blackhawk", "jet", "mammoth",
+    "capital", "penguin", "senator", "oiler", "flame", "canuck", "kraken",
+    "shark", "king", "duck", "avalanche", "wild", "predator", "blue",
+    "jacket", "lightning", "bolt", "panther", "devil", "ranger", "islander",
+    "golden knight", "vgk", "canadien", "habs",
+}
+
+def infer_sport_from_title(title: str) -> str | None:
+    t = title.lower()
+    for frag in MLB_FRAGMENTS:
+        if frag in t:
+            return "MLB"
+    for frag in NHL_FRAGMENTS:
+        if frag in t:
+            return "NHL"
+    for frag in NBA_FRAGMENTS:
+        if frag in t:
+            return "NBA"
+    for frag in NFL_FRAGMENTS:
+        if frag in t:
+            return "NFL"
+    return None
+
 AN_BASE = "https://api.actionnetwork.com/web/v1/scoreboard"
 AN_HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
@@ -252,6 +300,15 @@ class PublicFadeStrategy(BaseStrategy):
                 break
 
             if not fade_side or not entry_cents:
+                continue
+
+            # Sport consistency: don't apply NBA signal to MLB market etc.
+            inferred_sport = infer_sport_from_title(title)
+            if inferred_sport and inferred_sport != sport:
+                self.log.debug(
+                    f"Sport mismatch: Kalshi title suggests {inferred_sport} "
+                    f"but signal is from {sport} — skipping {title[:50]}"
+                )
                 continue
 
             expected_ret = round((100 - entry_cents) / entry_cents * 100, 1)
