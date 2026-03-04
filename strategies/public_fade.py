@@ -329,16 +329,36 @@ class PublicFadeStrategy(BaseStrategy):
                 continue
             if "winner" not in tl:
                 continue
-            ct = m.get("close_time") or m.get("expiration_time", "")
-            if not ct:
+            # Skip half-game markets
+            if any(x in tl for x in ("first half", "second half")):
                 continue
-            try:
-                closes = datetime.fromisoformat(ct.replace("Z", "+00:00"))
-                if closes <= now or closes > cutoff:
+            ticker = m.get("ticker", "")
+            sport  = sport_from_ticker(ticker)
+            if not sport:
+                continue
+            # For known game markets, use game date from ticker for window check.
+            # Settlement/close date can be 2+ weeks out — don't use that.
+            game_date_str = game_date_from_ticker(ticker)
+            if game_date_str:
+                try:
+                    game_dt = datetime.strptime(game_date_str, "%Y%m%d").replace(
+                        tzinfo=timezone.utc
+                    ) + timedelta(hours=29)  # day of game + buffer
+                    if game_dt < now or game_dt > cutoff:
+                        continue
+                except Exception:
                     continue
-            except Exception:
-                continue
-            ticker  = m.get("ticker", "")
+            else:
+                ct = m.get("close_time") or m.get("expiration_time", "")
+                if not ct:
+                    continue
+                try:
+                    closes = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                    if closes <= now or closes > cutoff:
+                        continue
+                except Exception:
+                    continue
+            ct      = m.get("close_time") or m.get("expiration_time", "")
             game_id = ticker.rsplit("-", 1)[0]
             if game_id in seen_games:
                 continue
@@ -348,6 +368,7 @@ class PublicFadeStrategy(BaseStrategy):
                 continue
             seen_games.add(game_id)
             m["_close_time"] = ct
+            m["_sport"] = sport
             game_markets.append(m)
 
         if not game_markets:
@@ -374,12 +395,9 @@ class PublicFadeStrategy(BaseStrategy):
             no_ask  = km.get("no_ask", 0)
             ct      = km.get("_close_time", "")
 
-            sport = sport_from_ticker(ticker)
+            sport    = km.get("_sport") or sport_from_ticker(ticker)
             if not sport:
-                continue  # only trade markets we can identify
-
-            # Use game date from ticker (e.g. 26MAR05 → 20260305)
-            # NOT the settlement/close date which is weeks later
+                continue
             date_str = game_date_from_ticker(ticker) or kalshi_close_date_str(ct)
             signals  = get_signals(sport, date_str)
             if not signals:
