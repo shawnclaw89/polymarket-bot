@@ -43,10 +43,11 @@ strategies:
     # Kalshi YES price range indicating public overbetting (cents)
     # Action Network signal thresholds
     min_public_pct: 65          # % of bets on public side to trigger
-    max_money_pct: 75           # skip if money % also this high (sharp confirming public = no edge)
+    min_divergence: 15          # min gap between bets% and money% — THIS is the actual signal
+    max_money_pct: 85           # hard ceiling: skip if money% also this high (sharp agrees with public)
     max_hours_to_close: 48      # game must be within 48h
     # Kalshi entry filters
-    min_entry_cents: 28         # don't touch extreme longshots
+    min_entry_cents: 20         # don't touch extreme longshots
     max_entry_cents: 72         # don't buy underdog priced above this
     # Execution
     max_position_usd: 250       # $250 per game

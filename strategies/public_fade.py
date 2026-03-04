@@ -164,13 +164,14 @@ class PublicFadeStrategy(BaseStrategy):
     name = "public_fade"
 
     def scan(self, markets: list, state: dict, cfg: dict, paper_trading: bool):
-        min_pub_pct   = cfg.get("min_public_pct", 65)   # % of bets on public side to trigger
-        max_money_pct = cfg.get("max_money_pct", 75)    # skip if money % also this high (sharp confirming public)
-        max_pos       = cfg.get("max_position_usd", 250)
-        max_hours     = cfg.get("max_hours_to_close", 48)
-        max_entry     = cfg.get("max_entry_cents", 72)   # don't buy underdog above this
-        min_entry     = cfg.get("min_entry_cents", 28)   # don't buy extreme longshots
-        risk          = state.get("_risk_config", {})
+        min_pub_pct    = cfg.get("min_public_pct", 65)    # % of bets on public side to trigger
+        min_divergence = cfg.get("min_divergence", 15)   # min gap: bets% - money% (the actual signal)
+        max_money_pct  = cfg.get("max_money_pct", 85)    # hard ceiling — if money% also this high, sharp agrees with public
+        max_pos        = cfg.get("max_position_usd", 250)
+        max_hours      = cfg.get("max_hours_to_close", 48)
+        max_entry      = cfg.get("max_entry_cents", 72)  # don't buy underdog above this
+        min_entry      = cfg.get("min_entry_cents", 20)  # don't buy extreme longshots
+        risk           = state.get("_risk_config", {})
 
         now = datetime.now(timezone.utc)
         game_cutoff = now + timedelta(hours=max_hours)
@@ -217,12 +218,23 @@ class PublicFadeStrategy(BaseStrategy):
                 else:
                     continue  # no strong public lean
 
-                # Skip if sharp money is ALSO with the public — no edge
-                # (divergence between bets% and money% is the signal)
+                # The signal: bets% >> money% means public is piling in but sharp money isn't
+                # Calculate divergence: positive = public heavy, sharp sitting out
+                divergence = pub_pct - (money_pct or 50)
+
+                # Skip if divergence too small (sharp money tracking public)
+                if divergence < min_divergence:
+                    self.log.debug(
+                        f"Skipping {fade_team.get('full_name')} — "
+                        f"divergence only {divergence:.0f}pt ({pub_pct}% bets / {money_pct}% money)"
+                    )
+                    continue
+
+                # Hard ceiling: if money% also very high, sharp confirms public — no fade
                 if money_pct is not None and money_pct >= max_money_pct:
                     self.log.debug(
-                        f"Skipping {fade_team.get('full_name')} fade — "
-                        f"sharp money also with public ({money_pct}% ≥ {max_money_pct}%)"
+                        f"Skipping {fade_team.get('full_name')} — "
+                        f"sharp money also heavily with public ({money_pct}% ≥ {max_money_pct}%)"
                     )
                     continue
 
@@ -232,6 +244,7 @@ class PublicFadeStrategy(BaseStrategy):
                     "fade_team":   fade_team,
                     "pub_pct":     pub_pct,
                     "money_pct":   money_pct,
+                    "divergence":  divergence,
                     "lean":        lean,
                 })
 
@@ -242,17 +255,13 @@ class PublicFadeStrategy(BaseStrategy):
         self.log.info(f"Found {len(fade_opps)} fade opportunity(s):")
         for opp in fade_opps:
             self.log.info(
-                f"  [{opp['sport']}] {opp['pub_pct']}% bets on "
-                f"{opp['public_team'].get('full_name')} | "
-                f"money {opp['money_pct']}% → fade "
-                f"{opp['fade_team'].get('full_name')}"
+                f"  [{opp['sport']}] {opp['pub_pct']}% bets / {opp['money_pct']}% money "
+                f"on {opp['public_team'].get('full_name')} "
+                f"(+{opp['divergence']:.0f}pt gap) → fade {opp['fade_team'].get('full_name')}"
             )
 
-        # Sort: highest public skew + biggest bets/money divergence first
-        fade_opps.sort(
-            key=lambda x: (x["pub_pct"] - (x["money_pct"] or 50)),
-            reverse=True,
-        )
+        # Sort: biggest bets/money divergence first — that's the strength of the signal
+        fade_opps.sort(key=lambda x: x["divergence"], reverse=True)
 
         # ── Step 2: Match to Kalshi + execute ────────────────────────────────
         for opp in fade_opps[:5]:
@@ -295,11 +304,10 @@ class PublicFadeStrategy(BaseStrategy):
             url = self.market_url(ticker)
             expected_ret = round((100 - entry_cents) / entry_cents * 100, 1)
 
-            bets_vs_money = (opp["pub_pct"] or 0) - (opp["money_pct"] or 50)
             detail = (
-                f"📊 Public: {opp['pub_pct']}% of bets on {public_name}\n"
-                f"💰 Money: {opp['money_pct']}% on {public_name} "
-                f"(+{bets_vs_money:.0f}pt bets/money gap — sharp divergence)\n"
+                f"📊 Bets: {opp['pub_pct']}% on {public_name}\n"
+                f"💰 Money: {opp['money_pct']}% on {public_name}\n"
+                f"⚡ Divergence: +{opp['divergence']:.0f}pt — sharp money NOT following public\n"
                 f"📉 Fade: {side} on {fade_name} @ {entry_cents}¢\n"
                 f"Expected return: +{expected_ret:.1f}% | Size: ${max_pos}"
             )
