@@ -266,12 +266,32 @@ def parse_teams(title: str, ticker: str) -> tuple[str, str]:
     return frag_a, frag_b
 
 
+_MONTH_MAP = {
+    "JAN":"01","FEB":"02","MAR":"03","APR":"04","MAY":"05","JUN":"06",
+    "JUL":"07","AUG":"08","SEP":"09","OCT":"10","NOV":"11","DEC":"12",
+}
+
+def game_date_from_ticker(ticker: str) -> str | None:
+    """
+    Extract YYYYMMDD game date from Kalshi ticker.
+    e.g. KXNBAGAME-26MAR05TORMIN-MIN  →  20260305
+         KXNHLGAME-26MAR06CAREDM-CAR  →  20260306
+    """
+    import re
+    m = re.search(r"-(\d{2})([A-Z]{3})(\d{2})", ticker.upper())
+    if not m:
+        return None
+    yy, mon, dd = m.group(1), m.group(2), m.group(3)
+    mm = _MONTH_MAP.get(mon)
+    if not mm:
+        return None
+    return f"20{yy}{mm}{dd}"
+
 def kalshi_close_date_str(close_time: str) -> str:
-    """Return YYYYMMDD in US Eastern time for the market close time."""
+    """Fallback: return YYYYMMDD from close time (UTC-5)."""
     try:
         dt_utc = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
-        # Convert to US Eastern (UTC-5 / UTC-4 DST — use UTC-5 as conservative)
-        dt_et = dt_utc - timedelta(hours=5)
+        dt_et  = dt_utc - timedelta(hours=5)
         return dt_et.strftime("%Y%m%d")
     except Exception:
         return datetime.now(timezone.utc).strftime("%Y%m%d")
@@ -358,7 +378,9 @@ class PublicFadeStrategy(BaseStrategy):
             if not sport:
                 continue  # only trade markets we can identify
 
-            date_str = kalshi_close_date_str(ct)
+            # Use game date from ticker (e.g. 26MAR05 → 20260305)
+            # NOT the settlement/close date which is weeks later
+            date_str = game_date_from_ticker(ticker) or kalshi_close_date_str(ct)
             signals  = get_signals(sport, date_str)
             if not signals:
                 continue
