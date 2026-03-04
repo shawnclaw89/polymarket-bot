@@ -164,13 +164,11 @@ class PublicFadeStrategy(BaseStrategy):
     name = "public_fade"
 
     def scan(self, markets: list, state: dict, cfg: dict, paper_trading: bool):
-        min_pub_pct    = cfg.get("min_public_pct", 65)    # % of bets on public side to trigger
-        min_divergence = cfg.get("min_divergence", 15)   # min gap: bets% - money% (the actual signal)
-        max_money_pct  = cfg.get("max_money_pct", 85)    # hard ceiling — if money% also this high, sharp agrees with public
+        min_pub_pct    = cfg.get("min_public_pct", 65)   # % of bets on public side to trigger
+        min_divergence = cfg.get("min_divergence", 15)   # min gap: bets% - money% — the signal
+        max_money_pct  = cfg.get("max_money_pct", 85)    # skip if sharp money also heavily with public
         max_pos        = cfg.get("max_position_usd", 250)
         max_hours      = cfg.get("max_hours_to_close", 48)
-        max_entry      = cfg.get("max_entry_cents", 72)  # don't buy underdog above this
-        min_entry      = cfg.get("min_entry_cents", 20)  # don't buy extreme longshots
         risk           = state.get("_risk_config", {})
 
         now = datetime.now(timezone.utc)
@@ -293,11 +291,7 @@ class PublicFadeStrategy(BaseStrategy):
 
             entry_cents = yes_ask if side == "YES" else no_ask
 
-            if not (min_entry <= entry_cents <= max_entry):
-                self.log.info(
-                    f"  Kalshi entry {entry_cents}¢ outside range "
-                    f"[{min_entry}–{max_entry}¢] for {fade_name}"
-                )
+            if entry_cents <= 0:
                 continue
 
             contracts = api.usd_to_contracts(max_pos, entry_cents)

@@ -41,14 +41,11 @@ strategies:
     enabled: true
     description: "Fade the public on sports favorites, confirmed by Polymarket whale activity"
     # Kalshi YES price range indicating public overbetting (cents)
-    # Action Network signal thresholds
+    # Signal thresholds — if signal is there, just bet it
     min_public_pct: 65          # % of bets on public side to trigger
-    min_divergence: 15          # min gap between bets% and money% — THIS is the actual signal
-    max_money_pct: 85           # hard ceiling: skip if money% also this high (sharp agrees with public)
+    min_divergence: 15          # min gap between bets% and money% — THE signal
+    max_money_pct: 85           # skip only if sharp money also heavily with public
     max_hours_to_close: 48      # game must be within 48h
-    # Kalshi entry filters
-    min_entry_cents: 20         # don't touch extreme longshots
-    max_entry_cents: 72         # don't buy underdog priced above this
     # Execution
     max_position_usd: 250       # $250 per game
     max_strategy_exposure_usd: 1250  # hard cap — max 5 games open at once
