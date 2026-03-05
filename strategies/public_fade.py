@@ -33,7 +33,7 @@ def sport_from_ticker(ticker: str) -> str | None:
             return sport
     return None
 
-# ── Team abbreviation → full name (from Kalshi ticker suffix) ────────────────
+# ── Sport-specific abbreviation dicts (NEVER merge these — cities collide) ───
 NBA_ABBREV = {
     "ATL":"atlanta hawks","BOS":"boston celtics","BKN":"brooklyn nets",
     "CHA":"charlotte hornets","CHI":"chicago bulls","CLE":"cleveland cavaliers",
@@ -59,65 +59,133 @@ NHL_ABBREV = {
     "UTA":"utah mammoth","VAN":"vancouver canucks","VGK":"vegas golden knights",
     "WSH":"washington capitals","WPG":"winnipeg jets",
 }
-ALL_ABBREV = {**NBA_ABBREV, **NHL_ABBREV}
-
-# Extra Kalshi-specific title fragments → full team name (for "at" format)
-KALSHI_TEAM_NAMES = {
-    "los angeles l":   "los angeles lakers",
-    "los angeles c":   "los angeles clippers",
-    "new york i":      "new york islanders",
-    "new york r":      "new york rangers",
-    "new york k":      "new york knicks",
-    "golden state":    "golden state warriors",
-    "oklahoma city":   "oklahoma city thunder",
-    "san antonio":     "san antonio spurs",
-    "new orleans":     "new orleans pelicans",
-    "utah":            "utah jazz",           # NBA
-    "indiana":         "indiana pacers",
-    "portland":        "portland trail blazers",
-    "sacramento":      "sacramento kings",
-    "memphis":         "memphis grizzlies",
-    "minnesota":       "minnesota timberwolves",
-    "toronto":         "toronto raptors",
-    "denver":          "denver nuggets",
-    "dallas":          "dallas mavericks",
-    "miami":           "miami heat",
-    "charlotte":       "charlotte hornets",
-    "chicago":         "chicago bulls",
-    "brooklyn":        "brooklyn nets",
-    "phoenix":         "phoenix suns",
-    "detroit":         "detroit pistons",
-    "cleveland":       "cleveland cavaliers",
-    "milwaukee":       "milwaukee bucks",
-    "atlanta":         "atlanta hawks",
-    "boston":          "boston celtics",
-    # NHL
-    "winnipeg":        "winnipeg jets",
-    "edmonton":        "edmonton oilers",
-    "ottawa":          "ottawa senators",
-    "calgary":         "calgary flames",
-    "vancouver":       "vancouver canucks",
-    "montreal":        "montreal canadiens",
-    "nashville":       "nashville predators",
-    "columbus":        "columbus blue jackets",
-    "pittsburgh":      "pittsburgh penguins",
-    "buffalo":         "buffalo sabres",
-    "anaheim":         "anaheim ducks",
-    "seattle":         "seattle kraken",
-    "colorado":        "colorado avalanche",
-    "carolina":        "carolina hurricanes",
-    "florida":         "florida panthers",
-    "tampa bay":       "tampa bay lightning",
-    "vegas":           "vegas golden knights",
-    "st. louis":       "st. louis blues",
-    "washington":      "washington capitals",
-    "new jersey":      "new jersey devils",
-    "philadelphia":    "philadelphia flyers",  # NHL
+MLB_ABBREV = {
+    "ARI":"arizona diamondbacks","ATL":"atlanta braves","BAL":"baltimore orioles",
+    "BOS":"boston red sox","CHC":"chicago cubs","CWS":"chicago white sox",
+    "CIN":"cincinnati reds","CLE":"cleveland guardians","COL":"colorado rockies",
+    "DET":"detroit tigers","HOU":"houston astros","KC":"kansas city royals",
+    "LAA":"los angeles angels","LAD":"los angeles dodgers","MIA":"miami marlins",
+    "MIL":"milwaukee brewers","MIN":"minnesota twins","NYM":"new york mets",
+    "NYY":"new york yankees","OAK":"oakland athletics","PHI":"philadelphia phillies",
+    "PIT":"pittsburgh pirates","SD":"san diego padres","SF":"san francisco giants",
+    "SEA":"seattle mariners","STL":"st. louis cardinals","TB":"tampa bay rays",
+    "TEX":"texas rangers","TOR":"toronto blue jays","WAS":"washington nationals",
 }
 
-def resolve_yes_team(ticker: str) -> str | None:
+SPORT_ABBREV = {
+    "NBA": NBA_ABBREV,
+    "NHL": NHL_ABBREV,
+    "MLB": MLB_ABBREV,
+}
+
+# ── Sport-specific Kalshi title fragment → AN full name ──────────────────────
+# These are the city/nickname fragments that appear in Kalshi market titles.
+# Keyed by sport so "minnesota" → Twins (MLB) vs Timberwolves (NBA) vs Wild (NHL).
+KALSHI_TEAM_NAMES: dict[str, dict[str, str]] = {
+    "NBA": {
+        "los angeles l":   "los angeles lakers",
+        "los angeles c":   "los angeles clippers",
+        "new york k":      "new york knicks",
+        "golden state":    "golden state warriors",
+        "oklahoma city":   "oklahoma city thunder",
+        "san antonio":     "san antonio spurs",
+        "new orleans":     "new orleans pelicans",
+        "utah":            "utah jazz",
+        "indiana":         "indiana pacers",
+        "portland":        "portland trail blazers",
+        "sacramento":      "sacramento kings",
+        "memphis":         "memphis grizzlies",
+        "minnesota":       "minnesota timberwolves",
+        "toronto":         "toronto raptors",
+        "denver":          "denver nuggets",
+        "dallas":          "dallas mavericks",
+        "miami":           "miami heat",
+        "charlotte":       "charlotte hornets",
+        "chicago":         "chicago bulls",
+        "brooklyn":        "brooklyn nets",
+        "phoenix":         "phoenix suns",
+        "detroit":         "detroit pistons",
+        "cleveland":       "cleveland cavaliers",
+        "milwaukee":       "milwaukee bucks",
+        "atlanta":         "atlanta hawks",
+        "boston":          "boston celtics",
+        "houston":         "houston rockets",
+        "orlando":         "orlando magic",
+        "washington":      "washington wizards",
+    },
+    "NHL": {
+        "los angeles":     "los angeles kings",
+        "new york i":      "new york islanders",
+        "new york r":      "new york rangers",
+        "winnipeg":        "winnipeg jets",
+        "edmonton":        "edmonton oilers",
+        "ottawa":          "ottawa senators",
+        "calgary":         "calgary flames",
+        "vancouver":       "vancouver canucks",
+        "montreal":        "montreal canadiens",
+        "nashville":       "nashville predators",
+        "columbus":        "columbus blue jackets",
+        "pittsburgh":      "pittsburgh penguins",
+        "buffalo":         "buffalo sabres",
+        "anaheim":         "anaheim ducks",
+        "seattle":         "seattle kraken",
+        "colorado":        "colorado avalanche",
+        "carolina":        "carolina hurricanes",
+        "florida":         "florida panthers",
+        "tampa bay":       "tampa bay lightning",
+        "vegas":           "vegas golden knights",
+        "st. louis":       "st. louis blues",
+        "washington":      "washington capitals",
+        "new jersey":      "new jersey devils",
+        "philadelphia":    "philadelphia flyers",
+        "chicago":         "chicago blackhawks",
+        "boston":          "boston bruins",
+        "detroit":         "detroit red wings",
+        "dallas":          "dallas stars",
+        "minnesota":       "minnesota wild",
+        "toronto":         "toronto maple leafs",
+        "san jose":        "san jose sharks",
+        "utah":            "utah mammoth",
+    },
+    "MLB": {
+        "new york y":      "new york yankees",
+        "new york m":      "new york mets",
+        "los angeles d":   "los angeles dodgers",
+        "los angeles a":   "los angeles angels",
+        "chicago c":       "chicago cubs",
+        "chicago w":       "chicago white sox",
+        "minnesota":       "minnesota twins",
+        "boston":          "boston red sox",
+        "houston":         "houston astros",
+        "atlanta":         "atlanta braves",
+        "philadelphia":    "philadelphia phillies",
+        "washington":      "washington nationals",
+        "toronto":         "toronto blue jays",
+        "tampa bay":       "tampa bay rays",
+        "baltimore":       "baltimore orioles",
+        "cleveland":       "cleveland guardians",
+        "detroit":         "detroit tigers",
+        "kansas city":     "kansas city royals",
+        "milwaukee":       "milwaukee brewers",
+        "pittsburgh":      "pittsburgh pirates",
+        "cincinnati":      "cincinnati reds",
+        "st. louis":       "st. louis cardinals",
+        "miami":           "miami marlins",
+        "arizona":         "arizona diamondbacks",
+        "colorado":        "colorado rockies",
+        "san diego":       "san diego padres",
+        "san francisco":   "san francisco giants",
+        "seattle":         "seattle mariners",
+        "texas":           "texas rangers",
+        "oakland":         "oakland athletics",
+    },
+}
+
+def resolve_yes_team(ticker: str, sport: str) -> str | None:
+    """Use sport-specific abbrev dict to avoid cross-sport city collisions."""
     suffix = ticker.split("-")[-1].upper()
-    return ALL_ABBREV.get(suffix)
+    abbrev = SPORT_ABBREV.get(sport, {})
+    return abbrev.get(suffix)
 
 
 # ── Action Network ────────────────────────────────────────────────────────────
@@ -185,13 +253,16 @@ def _extract_lean(game: dict, sport: str) -> dict | None:
 
 # ── Team matching ─────────────────────────────────────────────────────────────
 
-def _team_score(kalshi_frag: str, an_full_name: str) -> int:
+def _team_score(kalshi_frag: str, an_full_name: str, sport: str = "") -> int:
     frag = kalshi_frag.lower().strip().rstrip("?")
     full = an_full_name.lower()
     score = 0
-    # Check Kalshi-specific name first
-    mapped = KALSHI_TEAM_NAMES.get(frag)
-    if mapped and mapped in full:
+    # Check sport-specific Kalshi name map first (highest confidence)
+    sport_names = KALSHI_TEAM_NAMES.get(sport.upper(), {})
+    mapped = sport_names.get(frag)
+    if mapped and mapped == full:
+        score += 10   # exact sport-specific match — definitive
+    elif mapped and mapped in full:
         score += 5
     if frag in full or full in frag:
         score += 4
@@ -238,24 +309,26 @@ def build_team_signals(leans: list) -> dict:
     return signals
 
 
-def find_team_signal(frag: str, signals: dict) -> tuple:
+def find_team_signal(frag: str, signals: dict, sport: str = "") -> tuple:
     frag = frag.lower().strip()
-    # Check Kalshi-specific name mapping first
-    mapped = KALSHI_TEAM_NAMES.get(frag)
+    # Check sport-specific name mapping first — most reliable
+    sport_names = KALSHI_TEAM_NAMES.get(sport.upper(), {})
+    mapped = sport_names.get(frag)
     if mapped and mapped in signals:
         return mapped, signals[mapped]
     best_name, best_sig, best_score = None, None, 0
     for name, sig in signals.items():
-        score = _team_score(frag, name)
+        score = _team_score(frag, name, sport)
         if score > best_score:
             best_score, best_name, best_sig = score, name, sig
     return (best_name, best_sig) if best_score >= 3 else (None, None)
 
 
-def parse_teams(title: str, ticker: str) -> tuple[str, str]:
+def parse_teams(title: str, ticker: str, sport: str = "") -> tuple[str, str]:
     """
     Parse Kalshi title to get (frag_yes, frag_no).
     Returns frags for the YES-side team and NO-side team.
+    Sport is required for correct abbreviation lookup.
     """
     tl = title.lower()
     if " vs " in tl:
@@ -270,11 +343,11 @@ def parse_teams(title: str, ticker: str) -> tuple[str, str]:
     else:
         return "", ""
 
-    # Resolve YES team from ticker suffix
-    yes_team = resolve_yes_team(ticker)
+    # Resolve YES team from ticker suffix using sport-specific dict
+    yes_team = resolve_yes_team(ticker, sport)
     if yes_team:
-        sa = _team_score(frag_a, yes_team)
-        sb = _team_score(frag_b, yes_team)
+        sa = _team_score(frag_a, yes_team, sport)
+        sb = _team_score(frag_b, yes_team, sport)
         if sa >= sb:
             return frag_a, frag_b   # frag_a = YES
         else:
@@ -420,12 +493,12 @@ class PublicFadeStrategy(BaseStrategy):
             if not signals:
                 continue
 
-            frag_yes, frag_no = parse_teams(title, ticker)
+            frag_yes, frag_no = parse_teams(title, ticker, sport)
             if not frag_yes:
                 continue
 
-            yes_name, yes_sig = find_team_signal(frag_yes, signals)
-            no_name,  no_sig  = find_team_signal(frag_no,  signals)
+            yes_name, yes_sig = find_team_signal(frag_yes, signals, sport)
+            no_name,  no_sig  = find_team_signal(frag_no,  signals, sport)
 
             if not yes_sig and not no_sig:
                 continue
