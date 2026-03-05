@@ -171,13 +171,15 @@ def _extract_lean(game: dict, sport: str) -> dict | None:
     if home_pub is None or away_pub is None:
         return None
     return {
-        "sport":      sport.upper(),
-        "home_team":  teams.get(home_id, {}),
-        "away_team":  teams.get(away_id, {}),
-        "home_pub":   home_pub,
-        "away_pub":   away_pub,
-        "home_money": consensus.get("ml_home_money") or 50,
-        "away_money": consensus.get("ml_away_money") or 50,
+        "sport":       sport.upper(),
+        "home_team":   teams.get(home_id, {}),
+        "away_team":   teams.get(away_id, {}),
+        "home_pub":    home_pub,
+        "away_pub":    away_pub,
+        "home_money":  consensus.get("ml_home_money") or 50,
+        "away_money":  consensus.get("ml_away_money") or 50,
+        "home_ml":     consensus.get("ml_home"),   # American odds e.g. -120, +110
+        "away_ml":     consensus.get("ml_away"),
     }
 
 
@@ -204,6 +206,18 @@ def _team_score(kalshi_frag: str, an_full_name: str) -> int:
     return score
 
 
+def ml_to_implied_prob(ml) -> float | None:
+    """Convert American moneyline odds to implied probability (0-100)."""
+    try:
+        ml = int(ml)
+        if ml < 0:
+            return round((-ml) / (-ml + 100) * 100, 1)
+        else:
+            return round(100 / (ml + 100) * 100, 1)
+    except Exception:
+        return None
+
+
 def build_team_signals(leans: list) -> dict:
     signals = {}
     for lean in leans:
@@ -212,11 +226,14 @@ def build_team_signals(leans: list) -> dict:
             if not name:
                 continue
             opp = "away" if side == "home" else "home"
+            ml_line = lean.get(f"{side}_ml")
             signals[name] = {
-                "pub_pct":   lean[f"{side}_pub"],
-                "money_pct": lean[f"{side}_money"],
-                "sport":     lean["sport"],
-                "opponent":  lean[f"{opp}_team"].get("full_name", ""),
+                "pub_pct":    lean[f"{side}_pub"],
+                "money_pct":  lean[f"{side}_money"],
+                "sport":      lean["sport"],
+                "opponent":   lean[f"{opp}_team"].get("full_name", ""),
+                "ml_line":    ml_line,                    # American odds
+                "ml_implied": ml_to_implied_prob(ml_line), # % implied prob
             }
     return signals
 
@@ -446,7 +463,33 @@ class PublicFadeStrategy(BaseStrategy):
                     f"on {pub_name} (+{divergence:.0f}pt)"
                 )
 
+                # ── Sportsbook vs Kalshi mismatch check ──────────────────────
+                # Our bet wins when the public team LOSES (NO) or unpopular team WINS (YES)
+                # Calculate sportsbook implied prob that OUR bet wins
+                books_implied = None
+                books_ml      = sig.get("ml_line")
+                raw_implied   = sig.get("ml_implied")  # implied prob of the PUBLIC/sig team
+                if raw_implied is not None:
+                    if fade_side == "NO":
+                        # We win if public team loses → our true prob = opponent's prob
+                        books_implied = round(100 - raw_implied, 1)
+                    else:
+                        # We win if this unpopular team wins → their prob = raw_implied
+                        books_implied = raw_implied
+                kalshi_implied = entry_cents  # what Kalshi says our win prob is
+                line_gap = round(books_implied - kalshi_implied, 1) if books_implied is not None else None
+
                 require_approval = cfg.get("require_approval", True)
+
+                # ── Build mismatch line for notifications ─────────────────────
+                mismatch_line = ""
+                if line_gap is not None and line_gap >= 5:
+                    ml_str = f"{books_ml:+d}" if books_ml else "n/a"
+                    mismatch_line = (
+                        f"\n🚨 LINE MISMATCH: Books {ml_str} = {books_implied}% implied "
+                        f"vs Kalshi {kalshi_implied}¢ — GAP: +{line_gap}pt"
+                        f"\n👉 Want to add more than ${max_pos}?"
+                    )
 
                 if not require_approval:
                     # ── Auto-execute ──────────────────────────────────────────
@@ -457,6 +500,7 @@ class PublicFadeStrategy(BaseStrategy):
                     self.log.info(
                         f"[{'PAPER' if paper_trading else 'LIVE'}] Auto-executing "
                         f"{trade_id}: {ticker} {fade_side}@{entry_cents}¢"
+                        + (f" | LINE MISMATCH +{line_gap}pt" if line_gap and line_gap >= 5 else "")
                     )
                     if paper_trading:
                         state_mgr.open_position(state, ticker, self.name, fade_side, entry_cents, max_pos)
@@ -465,7 +509,8 @@ class PublicFadeStrategy(BaseStrategy):
                             f"Game: {title}\n"
                             f"Signal: {signal_summary}\n"
                             f"Trade: BUY {fade_side} @ {entry_cents}¢ | ${max_pos}\n"
-                            f"Expected: +{expected_ret:.1f}%",
+                            f"Expected: +{expected_ret:.1f}%"
+                            f"{mismatch_line}",
                             to=telegram_to,
                         )
                     else:
@@ -477,7 +522,8 @@ class PublicFadeStrategy(BaseStrategy):
                                 f"Game: {title}\n"
                                 f"Signal: {signal_summary}\n"
                                 f"Trade: BUY {fade_side} @ {entry_cents}¢ | ${max_pos}\n"
-                                f"Expected: +{expected_ret:.1f}%",
+                                f"Expected: +{expected_ret:.1f}%"
+                                f"{mismatch_line}",
                                 to=telegram_to,
                             )
                         else:
@@ -508,7 +554,8 @@ class PublicFadeStrategy(BaseStrategy):
                             f"Game: {title}\n"
                             f"Signal: {signal_summary}\n"
                             f"Trade: BUY {fade_side} on {fade_name} @ {entry_cents}¢\n"
-                            f"Expected: +{expected_ret:.1f}% | Size: ${max_pos}\n\n"
+                            f"Expected: +{expected_ret:.1f}% | Size: ${max_pos}"
+                            f"{mismatch_line}\n\n"
                             f"Reply: approve {trade_id}  or  reject {trade_id}\n"
                             f"(Expires in 30 min)",
                             to=telegram_to,
