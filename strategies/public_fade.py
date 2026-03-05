@@ -493,6 +493,10 @@ class PublicFadeStrategy(BaseStrategy):
 
                 if not require_approval:
                     # ── Auto-execute ──────────────────────────────────────────
+                    self.log.info(
+                        f"📡 Signal: {title[:55]} | {fade_side}@{entry_cents}¢ | {signal_summary}"
+                        + (f" | 🚨 LINE GAP +{line_gap}pt (books={books_implied}%)" if line_gap and line_gap >= 5 else "")
+                    )
                     if not self.can_open(state, risk, max_pos, cfg):
                         self.log.warning("Signal skipped — exposure limit reached.")
                         break
