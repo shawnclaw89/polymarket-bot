@@ -446,31 +446,73 @@ class PublicFadeStrategy(BaseStrategy):
                     f"on {pub_name} (+{divergence:.0f}pt)"
                 )
 
-                queued = pending_mgr.add(trade_id, {
-                    "ticker":      ticker,
-                    "kalshi_side": fade_side,
-                    "entry_cents": entry_cents,
-                    "size_usd":    max_pos,
-                    "title":       title,
-                    "signal":      signal_summary,
-                    "sport":       sport,
-                })
-                if queued:
+                require_approval = cfg.get("require_approval", True)
+
+                if not require_approval:
+                    # ── Auto-execute ──────────────────────────────────────────
+                    if not self.can_open(state, risk, max_pos, cfg):
+                        self.log.warning("Signal skipped — exposure limit reached.")
+                        break
+                    contracts = api.usd_to_contracts(max_pos, entry_cents)
                     self.log.info(
-                        f"⏳ Signal queued [{trade_id}]: {title[:55]} | "
-                        f"{signal_summary} → fade {fade_name} {fade_side}@{entry_cents}¢"
+                        f"[{'PAPER' if paper_trading else 'LIVE'}] Auto-executing "
+                        f"{trade_id}: {ticker} {fade_side}@{entry_cents}¢"
                     )
-                    notifier.send(
-                        f"🔔 Fade Signal — Awaiting Approval\n\n"
-                        f"ID: {trade_id}\n"
-                        f"Game: {title}\n"
-                        f"Signal: {signal_summary}\n"
-                        f"Trade: BUY {fade_side} on {fade_name} @ {entry_cents}¢\n"
-                        f"Expected: +{expected_ret:.1f}% | Size: ${max_pos}\n\n"
-                        f"Reply: approve {trade_id}  or  reject {trade_id}\n"
-                        f"(Expires in 30 min)",
-                        to=telegram_to,
-                    )
+                    if paper_trading:
+                        state_mgr.open_position(state, ticker, self.name, fade_side, entry_cents, max_pos)
+                        notifier.send(
+                            f"📝 PAPER Auto-Trade [{trade_id}]\n"
+                            f"Game: {title}\n"
+                            f"Signal: {signal_summary}\n"
+                            f"Trade: BUY {fade_side} @ {entry_cents}¢ | ${max_pos}\n"
+                            f"Expected: +{expected_ret:.1f}%",
+                            to=telegram_to,
+                        )
+                    else:
+                        order = api.place_order(ticker, fade_side.lower(), contracts, entry_cents)
+                        if order is not None:
+                            state_mgr.open_position(state, ticker, self.name, fade_side, entry_cents, max_pos)
+                            notifier.send(
+                                f"✅ LIVE Auto-Trade [{trade_id}]\n"
+                                f"Game: {title}\n"
+                                f"Signal: {signal_summary}\n"
+                                f"Trade: BUY {fade_side} @ {entry_cents}¢ | ${max_pos}\n"
+                                f"Expected: +{expected_ret:.1f}%",
+                                to=telegram_to,
+                            )
+                        else:
+                            notifier.send(
+                                f"❌ Auto-Trade FAILED [{trade_id}]\n"
+                                f"{ticker} {fade_side}@{entry_cents}¢ — order rejected",
+                                to=telegram_to,
+                            )
+                else:
+                    # ── Queue for manual approval ─────────────────────────────
+                    queued = pending_mgr.add(trade_id, {
+                        "ticker":      ticker,
+                        "kalshi_side": fade_side,
+                        "entry_cents": entry_cents,
+                        "size_usd":    max_pos,
+                        "title":       title,
+                        "signal":      signal_summary,
+                        "sport":       sport,
+                    })
+                    if queued:
+                        self.log.info(
+                            f"⏳ Signal queued [{trade_id}]: {title[:55]} | "
+                            f"{signal_summary} → fade {fade_name} {fade_side}@{entry_cents}¢"
+                        )
+                        notifier.send(
+                            f"🔔 Fade Signal — Awaiting Approval\n\n"
+                            f"ID: {trade_id}\n"
+                            f"Game: {title}\n"
+                            f"Signal: {signal_summary}\n"
+                            f"Trade: BUY {fade_side} on {fade_name} @ {entry_cents}¢\n"
+                            f"Expected: +{expected_ret:.1f}% | Size: ${max_pos}\n\n"
+                            f"Reply: approve {trade_id}  or  reject {trade_id}\n"
+                            f"(Expires in 30 min)",
+                            to=telegram_to,
+                        )
                 break  # one side per game
 
     def _execute_approved(self, state, risk, max_pos, cfg, paper_trading, telegram_to):
